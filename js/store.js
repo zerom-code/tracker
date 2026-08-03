@@ -29,7 +29,8 @@ function defaultState() {
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     transactions: [],  // {id, ts, type:'expense'|'transfer', amount, currency, categoryId, description, date, source, sourceId}
     subscriptions: [], // {id, name, amount, currency, period:'month'|'year', nextDate, active}
-    debts: [],         // {id, direction:'i-owe'|'owe-me', person, amount, currency, description, date, settled}
+    // долг — контейнер: entries (за что, сколько) + payments (погашения)
+    debts: [],         // {id, direction:'i-owe'|'owe-me', person, currency, date, settled, entries:[{id,amount,description,date}], payments:[{id,amount,date,note}]}
     mono: { clientName: '', accounts: [] },
     monoDeleted: [],   // id операций Monobank, удалённых вручную — не возвращать при импорте
   };
@@ -50,7 +51,7 @@ function load() {
       categories: Array.isArray(data.categories) && data.categories.length ? data.categories : base.categories,
       transactions: data.transactions || [],
       subscriptions: data.subscriptions || [],
-      debts: data.debts || [],
+      debts: (data.debts || []).map(normalizeDebt),
       monoDeleted: data.monoDeleted || [],
     };
   } catch (e) {
@@ -183,6 +184,41 @@ function activeSubs() {
   return state.subscriptions.filter((s) => s.active !== false);
 }
 
+/* Миграция старого плоского формата долга в контейнер с записями */
+function normalizeDebt(d) {
+  if (Array.isArray(d.entries)) return { payments: [], ...d };
+  return {
+    id: d.id,
+    direction: d.direction,
+    person: d.person,
+    currency: d.currency,
+    date: d.date,
+    settled: !!d.settled,
+    entries: [{ id: uid(), amount: d.amount || 0, description: d.description || '', date: d.date }],
+    payments: [],
+  };
+}
+
+function debtTotal(d) {
+  return d.entries.reduce((a, e) => a + e.amount, 0);
+}
+
+function debtPaid(d) {
+  return d.payments.reduce((a, p) => a + p.amount, 0);
+}
+
+function debtRemaining(d) {
+  return Math.max(0, debtTotal(d) - debtPaid(d));
+}
+
+function debtSettled(d) {
+  return d.settled || debtTotal(d) - debtPaid(d) <= 0.005;
+}
+
 function activeDebts(direction) {
-  return state.debts.filter((d) => d.direction === direction && !d.settled);
+  return state.debts.filter((d) => d.direction === direction && !debtSettled(d));
+}
+
+function normPerson(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }

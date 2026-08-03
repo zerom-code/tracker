@@ -211,6 +211,7 @@ input[type="checkbox"]:checked::after {
   touch-action: manipulation;
 }
 .row:last-child { border-bottom: none; }
+.row.compact { padding: 8px 0; }
 .row-emoji {
   width: 40px; height: 40px;
   border-radius: 12px;
@@ -284,6 +285,23 @@ input[type="checkbox"]:checked::after {
   background: var(--accent);
   color: #fff;
 }
+.seg-tight button { font-size: 12.5px; padding: 8px 2px; }
+
+.sums-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sums-line span {
+  color: var(--muted);
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sums-line span:nth-child(2) { text-align: center; }
+.sums-line span:last-child { text-align: right; }
+.sums-line b { color: var(--text); font-size: 14.5px; }
 
 .month-nav {
   display: flex;

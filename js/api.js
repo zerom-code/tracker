@@ -102,7 +102,8 @@ function categoryForMcc(mcc) {
 /**
  * Импорт выписки за период [fromSec, toSec] (unix-секунды).
  * Monobank отдаёт максимум 31 день + 1 час за один запрос.
- * Берём только списания (amount < 0), дубликаты отсекаем по id операции.
+ * Списания становятся расходами/переводами, поступления — доходами.
+ * Дубликаты отсекаем по id операции.
  */
 async function monoImport(accountId, fromSec, toSec) {
   const account = state.mono.accounts.find((a) => a.id === accountId);
@@ -116,22 +117,25 @@ async function monoImport(accountId, fromSec, toSec) {
   let added = 0, incomes = 0, duplicates = 0;
 
   for (const it of items) {
-    if (it.amount >= 0) { incomes++; continue; }
+    if (!it.amount) continue;
     if (known.has(it.id) || deleted.has(it.id)) { duplicates++; continue; }
-    const isTransfer = TRANSFER_MCC.includes(it.mcc);
+    const isIncome = it.amount > 0;
+    const isTransfer = !isIncome && TRANSFER_MCC.includes(it.mcc);
+    const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
     state.transactions.push({
       id: uid(),
       ts: (it.time || 0) * 1000,
-      type: isTransfer ? 'transfer' : 'expense',
+      type,
       amount: Math.abs(it.amount) / 100,
       currency: account.currency,
-      categoryId: isTransfer ? null : categoryForMcc(it.mcc),
+      categoryId: type === 'transfer' ? null : (isIncome ? FALLBACK_CATEGORY : categoryForMcc(it.mcc)),
       description: (it.description || '').replace(/\n/g, ' · '),
       date: toISO(new Date(it.time * 1000)),
       source: 'mono',
       sourceId: it.id,
     });
     added++;
+    if (isIncome) incomes++;
   }
 
   if (added) save();

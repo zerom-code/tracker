@@ -60,13 +60,14 @@ function renderHome() {
   const y = now.getFullYear(), m = now.getMonth();
   const spentBase = sumBase(txOfMonth(y, m, 'expense'));
   const transfersBase = sumBase(txOfMonth(y, m, 'transfer'));
+  const incomeBase = sumBase(txOfMonth(y, m, 'income'));
   const spent = moneyBoth(spentBase);
 
   const subsMonthly = activeSubs().reduce((acc, s) => acc + subMonthlyBase(s), 0);
   const subs = moneyBoth(subsMonthly);
 
-  const oweMe = moneyBoth(activeDebts('owe-me').reduce((a, d) => a + toBase(d.amount, d.currency), 0));
-  const iOwe = moneyBoth(activeDebts('i-owe').reduce((a, d) => a + toBase(d.amount, d.currency), 0));
+  const oweMe = moneyBoth(activeDebts('owe-me').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
+  const iOwe = moneyBoth(activeDebts('i-owe').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
 
   // топ категорий месяца
   const byCat = {};
@@ -89,6 +90,10 @@ function renderHome() {
       <div class="sub-amount">≈ ${spent.other}</div>
       <div class="divider"></div>
       <div class="rate-line">
+        <span style="color:var(--muted);font-size:14px">Доходы за месяц</span>
+        <span style="font-weight:700;color:var(--green)">+${fmtMoney(incomeBase, state.settings.baseCurrency)}</span>
+      </div>
+      <div class="rate-line" style="margin-top:6px">
         <span style="color:var(--muted);font-size:14px">Переводы за месяц</span>
         <span style="font-weight:700">${fmtMoney(transfersBase, state.settings.baseCurrency)}</span>
       </div>
@@ -156,6 +161,7 @@ function renderOps() {
 
   const expSum = sumBase(txOfMonth(y, m, 'expense'));
   const trSum = sumBase(txOfMonth(y, m, 'transfer'));
+  const inSum = sumBase(txOfMonth(y, m, 'income'));
 
   const groups = [];
   for (const t of sorted) {
@@ -173,16 +179,18 @@ function renderOps() {
       <button data-action="month-next">›</button>
     </div>
 
-    <div class="segmented" style="margin-bottom:12px">
+    <div class="segmented seg-tight" style="margin-bottom:12px">
       <button data-action="ops-filter" data-val="all" class="${ui.opsFilter === 'all' ? 'active' : ''}">Все</button>
       <button data-action="ops-filter" data-val="expense" class="${ui.opsFilter === 'expense' ? 'active' : ''}">Расходы</button>
       <button data-action="ops-filter" data-val="transfer" class="${ui.opsFilter === 'transfer' ? 'active' : ''}">Переводы</button>
+      <button data-action="ops-filter" data-val="income" class="${ui.opsFilter === 'income' ? 'active' : ''}">Доходы</button>
     </div>
 
     <div class="card">
-      <div class="rate-line">
-        <span style="color:var(--muted)">Расходы: <b style="color:var(--text)">${fmtMoney(expSum, state.settings.baseCurrency)}</b></span>
-        <span style="color:var(--muted)">Переводы: <b style="color:var(--accent)">${fmtMoney(trSum, state.settings.baseCurrency)}</b></span>
+      <div class="sums-line">
+        <span>Расходы<b>${fmtMoney(expSum, state.settings.baseCurrency)}</b></span>
+        <span>Переводы<b style="color:var(--accent)">${fmtMoney(trSum, state.settings.baseCurrency)}</b></span>
+        <span>Доходы<b style="color:var(--green)">+${fmtMoney(inSum, state.settings.baseCurrency)}</b></span>
       </div>
     </div>
 
@@ -201,11 +209,16 @@ function renderOps() {
 
 function txRow(t) {
   const isTr = t.type === 'transfer';
+  const isIn = t.type === 'income';
   const cat = isTr ? null : categoryById(t.categoryId);
-  const emoji = isTr ? '🔁' : cat.emoji;
-  const title = t.description || (isTr ? 'Перевод' : cat.name);
-  const subParts = [isTr ? 'Перевод' : cat.name];
+  const emoji = isTr ? '🔁' : (isIn && (!t.categoryId || t.categoryId === FALLBACK_CATEGORY) ? '💰' : cat.emoji);
+  const title = t.description || (isTr ? 'Перевод' : (isIn ? 'Доход' : cat.name));
+  const subParts = [];
+  if (isTr) subParts.push('Перевод');
+  else if (isIn) subParts.push(t.categoryId && t.categoryId !== FALLBACK_CATEGORY ? 'Доход · ' + cat.name : 'Доход');
+  else subParts.push(cat.name);
   if (t.source === 'mono') subParts.push('Monobank');
+  const amountCls = isIn ? 'positive' : (isTr ? 'transfer' : 'expense');
   return `
     <div class="row" data-action="edit-tx" data-id="${t.id}">
       <div class="row-emoji">${emoji}</div>
@@ -214,7 +227,7 @@ function txRow(t) {
         <div class="row-sub">${esc(subParts.join(' · '))}</div>
       </div>
       <div class="row-right">
-        <div class="row-amount ${isTr ? 'transfer' : 'expense'}">−${fmtMoney(t.amount, t.currency)}</div>
+        <div class="row-amount ${amountCls}">${isIn ? '+' : '−'}${fmtMoney(t.amount, t.currency)}</div>
       </div>
     </div>`;
 }
@@ -291,18 +304,26 @@ function renderSubs() {
 /* ---------- долги ---------- */
 
 function debtRow(d) {
-  const settleBtn = d.settled ? '' :
-    `<button class="icon-btn ok" data-action="settle-debt" data-id="${d.id}" title="Погашен">✓</button>`;
+  const settled = debtSettled(d);
+  const remaining = debtRemaining(d);
+  const total = debtTotal(d);
+  const firstDesc = d.entries.length ? (d.entries[0].description || 'без описания') : 'без описания';
+  const more = d.entries.length > 1 ? ` · ещё ${d.entries.length - 1}` : '';
+  const settleBtn = settled ? '' :
+    `<button class="icon-btn ok" data-action="settle-debt" data-id="${d.id}" title="Погасить полностью">✓</button>`;
+  const partial = !settled && debtPaid(d) > 0
+    ? `<div class="row-sub">из ${fmtMoney(total, d.currency)}</div>` : '';
   return `
-    <div class="row ${d.settled ? 'settled' : ''}" data-action="edit-debt" data-id="${d.id}">
+    <div class="row ${settled ? 'settled' : ''}" data-action="edit-debt" data-id="${d.id}">
       <div class="row-emoji">${d.direction === 'owe-me' ? '📥' : '📤'}</div>
       <div class="row-main">
         <div class="row-title">${esc(d.person)}</div>
-        <div class="row-sub">${esc(d.description || 'без описания')}</div>
+        <div class="row-sub">${esc(firstDesc)}${esc(more)}</div>
       </div>
       <div class="inline-actions">
         <div class="row-right">
-          <div class="row-amount ${d.settled ? '' : (d.direction === 'owe-me' ? 'positive' : 'negative')}">${fmtMoney(d.amount, d.currency)}</div>
+          <div class="row-amount ${settled ? '' : (d.direction === 'owe-me' ? 'positive' : 'negative')}">${fmtMoney(settled ? total : remaining, d.currency)}</div>
+          ${partial}
         </div>
         ${settleBtn}
       </div>
@@ -312,8 +333,8 @@ function debtRow(d) {
 function renderDebts() {
   const dir = ui.debtsTab;
   const active = activeDebts(dir);
-  const settled = state.debts.filter((d) => d.direction === dir && d.settled);
-  const total = moneyBoth(active.reduce((a, d) => a + toBase(d.amount, d.currency), 0));
+  const settled = state.debts.filter((d) => d.direction === dir && debtSettled(d));
+  const total = moneyBoth(active.reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
 
   return `
     <h1 class="screen-title">Долги</h1>
@@ -384,7 +405,7 @@ function renderSettings() {
     </div>
     <button class="btn" data-action="mono-import">Импортировать операции</button>
     <button class="btn danger-ghost" data-action="mono-disconnect">Отключить Monobank</button>
-    <p class="hint">Списания станут расходами (категория — по типу магазина), переводы и снятие наличных попадут в «Переводы». Уже импортированные операции не дублируются.</p>
+    <p class="hint">Списания станут расходами (категория — по типу магазина), переводы и снятие наличных попадут в «Переводы», поступления — в «Доходы». Уже импортированные операции не дублируются.</p>
   ` : `
     <div class="field">
       <label>Токен персонального API</label>
@@ -500,8 +521,9 @@ function parseAmount(str) {
 
 function openTxForm(tx) {
   const isNew = !tx;
+  const defaultType = { transfer: 'transfer', income: 'income' }[ui.opsFilter] || 'expense';
   const t = tx || {
-    type: ui.screen === 'ops' && ui.opsFilter === 'transfer' ? 'transfer' : 'expense',
+    type: ui.screen === 'ops' ? defaultType : 'expense',
     amount: '', currency: state.settings.baseCurrency,
     categoryId: null, description: '', date: todayISO(),
   };
@@ -511,7 +533,7 @@ function openTxForm(tx) {
     <form id="sheet-form" data-form="tx" data-id="${tx ? tx.id : ''}">
       <div class="field">
         <div class="segmented" id="tx-type-seg">
-          ${segButtons([['expense', 'Расход'], ['transfer', 'Перевод']], t.type)}
+          ${segButtons([['expense', 'Расход'], ['transfer', 'Перевод'], ['income', 'Доход']], t.type)}
         </div>
       </div>
       <div class="field">
@@ -533,7 +555,7 @@ function openTxForm(tx) {
       </div>
       <div class="field">
         <label>${t.type === 'transfer' ? 'Кому / описание' : 'Описание'}</label>
-        <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: маме на карту' : 'например: кофе с собой'}" value="${esc(t.description)}">
+        <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: маме на карту' : (t.type === 'income' ? 'например: зарплата' : 'например: кофе с собой')}" value="${esc(t.description)}">
       </div>
       <div class="field">
         <label>Дата</label>
@@ -555,18 +577,15 @@ function submitTxForm(form) {
   const date = document.getElementById('tx-date').value || todayISO();
   const description = document.getElementById('tx-desc').value.trim();
 
+  const categoryId = type !== 'transfer' ? (catBtn ? catBtn.dataset.cat : FALLBACK_CATEGORY) : null;
   const id = form.dataset.id;
   if (id) {
     const t = state.transactions.find((x) => x.id === id);
     if (!t) return;
-    Object.assign(t, {
-      type, amount, currency, date, description,
-      categoryId: type === 'expense' ? (catBtn ? catBtn.dataset.cat : FALLBACK_CATEGORY) : null,
-    });
+    Object.assign(t, { type, amount, currency, date, description, categoryId });
   } else {
     state.transactions.push({
-      id: uid(), ts: Date.now(), type, amount, currency, date, description,
-      categoryId: type === 'expense' ? (catBtn ? catBtn.dataset.cat : FALLBACK_CATEGORY) : null,
+      id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
       source: 'manual', sourceId: null,
     });
   }
@@ -647,76 +666,272 @@ function submitSubForm(form) {
 /* --- долг --- */
 
 function openDebtForm(debt) {
-  const isNew = !debt;
-  const d = debt || {
-    direction: ui.debtsTab, person: '', amount: '', currency: 'UAH',
-    description: '', date: todayISO(), settled: false,
-  };
+  if (!debt) { openNewDebtForm(); return; }
+
+  const remaining = debtRemaining(debt);
+  const entriesHtml = debt.entries.map((e) => `
+    <div class="row compact" data-action="edit-debt-entry" data-debt="${debt.id}" data-id="${e.id}">
+      <div class="row-main">
+        <div class="row-title" style="font-weight:500">${esc(e.description || 'без описания')}</div>
+        <div class="row-sub">${fmtDay(e.date)}</div>
+      </div>
+      <div class="row-right"><div class="row-amount">${fmtMoney(e.amount, debt.currency)}</div></div>
+    </div>`).join('');
+
+  const paymentsHtml = debt.payments.map((p) => `
+    <div class="row compact" data-action="edit-debt-payment" data-debt="${debt.id}" data-id="${p.id}">
+      <div class="row-main">
+        <div class="row-title" style="font-weight:500">${esc(p.note || 'Погашение')}</div>
+        <div class="row-sub">${fmtDay(p.date)}</div>
+      </div>
+      <div class="row-right"><div class="row-amount positive">−${fmtMoney(p.amount, debt.currency)}</div></div>
+    </div>`).join('');
 
   openSheet(`
-    ${sheetHead(isNew ? 'Новый долг' : 'Изменить долг')}
-    <form id="sheet-form" data-form="debt" data-id="${debt ? debt.id : ''}">
+    ${sheetHead('Долг · ' + debt.person)}
+    <form id="sheet-form" data-form="debt" data-id="${debt.id}">
       <div class="field">
         <div class="segmented" id="debt-dir-seg">
-          ${segButtons([['owe-me', 'Мне должны'], ['i-owe', 'Я должен']], d.direction)}
+          ${segButtons([['owe-me', 'Мне должны'], ['i-owe', 'Я должен']], debt.direction)}
+        </div>
+      </div>
+      <div class="field-split">
+        <div class="field">
+          <label>Кто</label>
+          <input id="debt-person" type="text" placeholder="Имя" value="${esc(debt.person)}" required>
+        </div>
+        <div class="field" style="flex:0 0 120px">
+          <label>Валюта</label>
+          <div class="segmented" id="debt-cur-seg">
+            ${segButtons([['UAH', '₴'], ['USD', '$']], debt.currency)}
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>За что (${debt.entries.length})</label>
+        <div class="card" style="padding:2px 12px;margin:0">${entriesHtml}</div>
+        <button type="button" class="btn secondary" data-action="add-debt-entry" data-debt="${debt.id}" style="margin-top:8px">＋ Добавить запись</button>
+      </div>
+
+      <div class="field">
+        <label>Погашения</label>
+        ${debt.payments.length ? `<div class="card" style="padding:2px 12px;margin:0">${paymentsHtml}</div>` : ''}
+        <button type="button" class="btn secondary" data-action="add-debt-payment" data-debt="${debt.id}" style="margin-top:8px">Частичное погашение</button>
+      </div>
+
+      <div class="rate-line" style="margin:4px 2px 12px">
+        <span style="color:var(--muted);font-size:14px">Осталось</span>
+        <span style="font-weight:800;font-size:17px">${fmtMoney(remaining, debt.currency)} <span style="color:var(--muted);font-weight:400;font-size:13px">из ${fmtMoney(debtTotal(debt), debt.currency)}</span></span>
+      </div>
+
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
+          <input id="debt-settled" type="checkbox" ${debtSettled(debt) ? 'checked' : ''}>
+          Долг закрыт
+        </label>
+      </div>
+      <button type="submit" class="btn">Сохранить</button>
+      <button type="button" class="btn danger-ghost" data-action="del-debt" data-id="${debt.id}">Удалить долг</button>
+    </form>
+  `);
+}
+
+function openNewDebtForm() {
+  openSheet(`
+    ${sheetHead('Новый долг')}
+    <form id="sheet-form" data-form="debt" data-id="">
+      <div class="field">
+        <div class="segmented" id="debt-dir-seg">
+          ${segButtons([['owe-me', 'Мне должны'], ['i-owe', 'Я должен']], ui.debtsTab)}
         </div>
       </div>
       <div class="field">
         <label>Кто</label>
-        <input id="debt-person" type="text" placeholder="Имя" value="${esc(d.person)}" required>
+        <input id="debt-person" type="text" placeholder="Имя" required>
       </div>
       <div class="field">
         <label>Сумма</label>
         <div class="amount-row">
-          <input id="debt-amount" type="text" inputmode="decimal" placeholder="0" value="${d.amount || ''}" required>
+          <input id="debt-amount" type="text" inputmode="decimal" placeholder="0" required>
           <div class="segmented" id="debt-cur-seg">
-            ${segButtons([['UAH', '₴'], ['USD', '$']], d.currency)}
+            ${segButtons([['UAH', '₴'], ['USD', '$']], 'UAH')}
           </div>
         </div>
       </div>
       <div class="field">
         <label>За что</label>
-        <input id="debt-desc" type="text" placeholder="например: за билеты на концерт" value="${esc(d.description)}">
+        <input id="debt-desc" type="text" placeholder="например: за билеты на концерт">
       </div>
       <div class="field">
         <label>Дата</label>
-        <input id="debt-date" type="date" value="${d.date}">
+        <input id="debt-date" type="date" value="${todayISO()}">
       </div>
-      ${isNew ? '' : `
-      <div class="field">
-        <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
-          <input id="debt-settled" type="checkbox" ${d.settled ? 'checked' : ''}>
-          Долг погашен
-        </label>
-      </div>`}
-      <button type="submit" class="btn">${isNew ? 'Добавить' : 'Сохранить'}</button>
-      ${isNew ? '' : `<button type="button" class="btn danger-ghost" data-action="del-debt" data-id="${debt.id}">Удалить долг</button>`}
+      <button type="submit" class="btn">Добавить</button>
+      <p class="hint">Если у этого человека уже есть незакрытый долг, приложение предложит объединить записи или зачесть встречный долг.</p>
     </form>
   `);
 }
 
 function submitDebtForm(form) {
   const person = document.getElementById('debt-person').value.trim();
-  const amount = parseAmount(document.getElementById('debt-amount').value);
-  if (!person) { toast('Укажите, кто должен'); return; }
-  if (!amount) { toast('Введите сумму больше нуля'); return; }
-  const settledEl = document.getElementById('debt-settled');
-  const data = {
-    direction: segValue('#debt-dir-seg') || 'owe-me',
-    person, amount,
-    currency: segValue('#debt-cur-seg') || 'UAH',
-    description: document.getElementById('debt-desc').value.trim(),
-    date: document.getElementById('debt-date').value || todayISO(),
-  };
+  if (!person) { toast('Укажите имя'); return; }
+  const direction = segValue('#debt-dir-seg') || 'owe-me';
+  const currency = segValue('#debt-cur-seg') || 'UAH';
   const id = form.dataset.id;
+
   if (id) {
     const d = state.debts.find((x) => x.id === id);
     if (!d) return;
-    Object.assign(d, data, { settled: settledEl ? settledEl.checked : d.settled });
-  } else {
-    state.debts.push({ id: uid(), ...data, settled: false });
+    const settledEl = document.getElementById('debt-settled');
+    d.direction = direction;
+    d.person = person;
+    d.currency = currency;
+    d.settled = settledEl.checked;
+    save(); closeSheet(); render();
+    return;
   }
+
+  const amount = parseAmount(document.getElementById('debt-amount').value);
+  if (!amount) { toast('Введите сумму больше нуля'); return; }
+  const description = document.getElementById('debt-desc').value.trim();
+  const date = document.getElementById('debt-date').value || todayISO();
+  const norm = normPerson(person);
+
+  // тот же человек, то же направление → предложить объединить
+  const sameDir = state.debts.find((d) =>
+    !debtSettled(d) && d.direction === direction && d.currency === currency && normPerson(d.person) === norm);
+  if (sameDir && confirm(`У «${sameDir.person}» уже есть незакрытый долг на ${fmtMoney(debtRemaining(sameDir), currency)}.\n\nОбъединить с ним? («Отмена» — записать отдельным долгом)`)) {
+    sameDir.entries.push({ id: uid(), amount, description, date });
+    sameDir.settled = false;
+    save(); closeSheet(); render();
+    toast(`Добавлено к долгу «${sameDir.person}»: теперь ${fmtMoney(debtRemaining(sameDir), currency)}`);
+    return;
+  }
+
+  // тот же человек, встречное направление → предложить взаимозачёт
+  const opposite = state.debts.find((d) =>
+    !debtSettled(d) && d.direction !== direction && d.currency === currency && normPerson(d.person) === norm);
+  if (opposite) {
+    const rem = debtRemaining(opposite);
+    const offset = Math.min(amount, rem);
+    const msg = direction === 'owe-me'
+      ? `Вы должны «${opposite.person}» ${fmtMoney(rem, currency)}.\n\nЗачесть ${fmtMoney(offset, currency)} в счёт вашего долга? Запись о встречном долге сохранится.`
+      : `«${opposite.person}» должен вам ${fmtMoney(rem, currency)}.\n\nЗачесть ${fmtMoney(offset, currency)} в счёт его долга? Запись о вашем долге сохранится.`;
+    if (confirm(msg)) {
+      opposite.payments.push({ id: uid(), amount: offset, date, note: 'Взаимозачёт' });
+      opposite.settled = debtRemaining(opposite) <= 0.005;
+      const newDebt = {
+        id: uid(), direction, person, currency, date, settled: false,
+        entries: [{ id: uid(), amount, description, date }],
+        payments: [{ id: uid(), amount: offset, date, note: 'Взаимозачёт' }],
+      };
+      newDebt.settled = debtRemaining(newDebt) <= 0.005;
+      state.debts.push(newDebt);
+      save(); closeSheet(); render();
+      toast(opposite.settled && newDebt.settled
+        ? 'Долги взаимно погашены 🎉'
+        : `Зачтено ${fmtMoney(offset, currency)}`);
+      return;
+    }
+  }
+
+  state.debts.push({
+    id: uid(), direction, person, currency, date, settled: false,
+    entries: [{ id: uid(), amount, description, date }],
+    payments: [],
+  });
   save(); closeSheet(); render();
+}
+
+/* --- запись и погашение внутри долга --- */
+
+function openDebtEntryForm(debtId, entryId) {
+  const debt = state.debts.find((d) => d.id === debtId);
+  if (!debt) return;
+  const entry = entryId ? debt.entries.find((e) => e.id === entryId) : null;
+  openSheet(`
+    ${sheetHead(entry ? 'Изменить запись' : 'Новая запись')}
+    <form id="sheet-form" data-form="debt-entry" data-debt="${debt.id}" data-id="${entry ? entry.id : ''}">
+      <div class="field">
+        <label>Сумма (${debt.currency === 'USD' ? '$' : '₴'})</label>
+        <input id="de-amount" type="text" inputmode="decimal" placeholder="0" value="${entry ? entry.amount : ''}" required>
+      </div>
+      <div class="field">
+        <label>За что</label>
+        <input id="de-desc" type="text" placeholder="например: за обед" value="${entry ? esc(entry.description) : ''}">
+      </div>
+      <div class="field">
+        <label>Дата</label>
+        <input id="de-date" type="date" value="${entry ? entry.date : todayISO()}">
+      </div>
+      <button type="submit" class="btn">Сохранить</button>
+      ${entry ? `<button type="button" class="btn danger-ghost" data-action="del-debt-entry" data-debt="${debt.id}" data-id="${entry.id}">Удалить запись</button>` : ''}
+    </form>
+  `);
+}
+
+function openDebtPaymentForm(debtId, paymentId) {
+  const debt = state.debts.find((d) => d.id === debtId);
+  if (!debt) return;
+  const payment = paymentId ? debt.payments.find((p) => p.id === paymentId) : null;
+  openSheet(`
+    ${sheetHead(payment ? 'Изменить погашение' : 'Частичное погашение')}
+    <form id="sheet-form" data-form="debt-payment" data-debt="${debt.id}" data-id="${payment ? payment.id : ''}">
+      <div class="field">
+        <label>Сумма (${debt.currency === 'USD' ? '$' : '₴'}) — осталось ${fmtMoney(debtRemaining(debt), debt.currency)}</label>
+        <input id="dp-amount" type="text" inputmode="decimal" placeholder="0" value="${payment ? payment.amount : debtRemaining(debt) || ''}" required>
+      </div>
+      <div class="field">
+        <label>Дата</label>
+        <input id="dp-date" type="date" value="${payment ? payment.date : todayISO()}">
+      </div>
+      <button type="submit" class="btn">Сохранить</button>
+      ${payment ? `<button type="button" class="btn danger-ghost" data-action="del-debt-payment" data-debt="${debt.id}" data-id="${payment.id}">Удалить погашение</button>` : ''}
+    </form>
+  `);
+}
+
+function recalcDebtSettled(d) {
+  d.settled = debtTotal(d) - debtPaid(d) <= 0.005;
+}
+
+function submitDebtEntryForm(form) {
+  const debt = state.debts.find((d) => d.id === form.dataset.debt);
+  if (!debt) return;
+  const amount = parseAmount(document.getElementById('de-amount').value);
+  if (!amount) { toast('Введите сумму больше нуля'); return; }
+  const description = document.getElementById('de-desc').value.trim();
+  const date = document.getElementById('de-date').value || todayISO();
+  const id = form.dataset.id;
+  if (id) {
+    const e = debt.entries.find((x) => x.id === id);
+    if (e) Object.assign(e, { amount, description, date });
+  } else {
+    debt.entries.push({ id: uid(), amount, description, date });
+  }
+  recalcDebtSettled(debt);
+  save(); render();
+  openDebtForm(debt);
+}
+
+function submitDebtPaymentForm(form) {
+  const debt = state.debts.find((d) => d.id === form.dataset.debt);
+  if (!debt) return;
+  const amount = parseAmount(document.getElementById('dp-amount').value);
+  if (!amount) { toast('Введите сумму больше нуля'); return; }
+  const date = document.getElementById('dp-date').value || todayISO();
+  const id = form.dataset.id;
+  if (id) {
+    const p = debt.payments.find((x) => x.id === id);
+    if (p) Object.assign(p, { amount, date });
+  } else {
+    debt.payments.push({ id: uid(), amount, date, note: '' });
+  }
+  recalcDebtSettled(debt);
+  save(); render();
+  if (debt.settled) { closeSheet(); toast('Долг погашен полностью 🎉'); }
+  else openDebtForm(debt);
 }
 
 /* --- категория --- */
@@ -835,7 +1050,7 @@ async function handleMonoImport(btn) {
     const r = await monoImport(acc.value, range.fromSec, range.toSec);
     render();
     toast(r.added
-      ? `Добавлено операций: ${r.added}` + (r.duplicates ? `, пропущено дублей: ${r.duplicates}` : '')
+      ? `Добавлено операций: ${r.added}` + (r.incomes ? ` (доходов: ${r.incomes})` : '') + (r.duplicates ? `, дублей: ${r.duplicates}` : '')
       : 'Новых операций нет' + (r.duplicates ? ` (дублей: ${r.duplicates})` : ''));
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Импортировать операции';
@@ -905,7 +1120,7 @@ document.addEventListener('click', (e) => {
 
   const el = e.target.closest('[data-action]');
   if (!el) return;
-  const { action, id, val } = el.dataset;
+  const { action, id, val, debt } = el.dataset;
 
   switch (action) {
     case 'modal-close':
@@ -930,7 +1145,38 @@ document.addEventListener('click', (e) => {
     case 'pay-sub': paySubscription(id); break;
     case 'settle-debt': {
       const d = state.debts.find((x) => x.id === id);
-      if (d) { d.settled = true; save(); render(); toast('Долг погашен 🎉'); }
+      if (d) {
+        const rem = debtRemaining(d);
+        if (rem > 0) d.payments.push({ id: uid(), amount: rem, date: todayISO(), note: '' });
+        d.settled = true;
+        save(); render(); toast('Долг погашен 🎉');
+      }
+      break;
+    }
+
+    case 'add-debt-entry': openDebtEntryForm(debt, null); break;
+    case 'edit-debt-entry': openDebtEntryForm(debt, id); break;
+    case 'del-debt-entry': {
+      const d = state.debts.find((x) => x.id === debt);
+      if (!d) break;
+      if (d.entries.length <= 1) { toast('Это единственная запись — удалите весь долг'); break; }
+      if (confirm('Удалить запись?')) {
+        d.entries = d.entries.filter((x) => x.id !== id);
+        recalcDebtSettled(d);
+        save(); render(); openDebtForm(d);
+      }
+      break;
+    }
+    case 'add-debt-payment': openDebtPaymentForm(debt, null); break;
+    case 'edit-debt-payment': openDebtPaymentForm(debt, id); break;
+    case 'del-debt-payment': {
+      const d = state.debts.find((x) => x.id === debt);
+      if (!d) break;
+      if (confirm('Удалить погашение?')) {
+        d.payments = d.payments.filter((x) => x.id !== id);
+        recalcDebtSettled(d);
+        save(); render(); openDebtForm(d);
+      }
       break;
     }
 
@@ -1013,6 +1259,8 @@ document.addEventListener('submit', (e) => {
   if (kind === 'tx') submitTxForm(form);
   else if (kind === 'sub') submitSubForm(form);
   else if (kind === 'debt') submitDebtForm(form);
+  else if (kind === 'debt-entry') submitDebtEntryForm(form);
+  else if (kind === 'debt-payment') submitDebtPaymentForm(form);
   else if (kind === 'category') submitCategoryForm(form);
 });
 
