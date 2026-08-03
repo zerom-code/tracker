@@ -841,7 +841,7 @@ document.addEventListener('click', (e) => {
     ui.screen = navBtn.dataset.nav;
     history.replaceState(null, '', '#' + ui.screen);
     render();
-    window.scrollTo(0, 0);
+    screenEl.scrollTop = 0;
     return;
   }
 
