@@ -114,6 +114,7 @@ async function monoImport(accountId, fromSec, toSec) {
 
   const known = new Set(state.transactions.map((t) => t.sourceId).filter(Boolean));
   const deleted = new Set(state.monoDeleted || []);
+  const addedDates = [];
   let added = 0, incomes = 0, duplicates = 0;
 
   for (const it of items) {
@@ -122,6 +123,7 @@ async function monoImport(accountId, fromSec, toSec) {
     const isIncome = it.amount > 0;
     const isTransfer = !isIncome && TRANSFER_MCC.includes(it.mcc);
     const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
+    addedDates.push(toISO(new Date(it.time * 1000)));
     state.transactions.push({
       id: uid(),
       ts: (it.time || 0) * 1000,
@@ -139,5 +141,5 @@ async function monoImport(accountId, fromSec, toSec) {
   }
 
   if (added) save();
-  return { added, incomes, duplicates };
+  return { added, incomes, duplicates, addedDates };
 }

@@ -1048,9 +1048,16 @@ async function handleMonoImport(btn) {
   btn.disabled = true; btn.textContent = 'Импортируем…';
   try {
     const r = await monoImport(acc.value, range.fromSec, range.toSec);
+    // если операции легли в разные месяцы — подсказать, где искать:
+    // экран «Операции» показывает один месяц за раз
+    const byMonth = {};
+    r.addedDates.forEach((d) => { byMonth[d.slice(0, 7)] = (byMonth[d.slice(0, 7)] || 0) + 1; });
+    const months = Object.keys(byMonth).sort()
+      .map((k) => `${MONTHS_RU[Number(k.slice(5, 7)) - 1]} — ${byMonth[k]}`);
     render();
     toast(r.added
-      ? `Добавлено операций: ${r.added}` + (r.incomes ? ` (доходов: ${r.incomes})` : '') + (r.duplicates ? `, дублей: ${r.duplicates}` : '')
+      ? `Добавлено операций: ${r.added}` + (r.incomes ? ` (доходов: ${r.incomes})` : '') +
+        (months.length > 1 ? `\n${months.join(', ')}` : '')
       : 'Новых операций нет' + (r.duplicates ? ` (дублей: ${r.duplicates})` : ''));
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Импортировать операции';
