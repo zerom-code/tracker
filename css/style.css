@@ -70,6 +70,43 @@ input:focus, select:focus, textarea:focus {
 }
 input[type="date"] { min-height: 47px; }
 
+/* радио и галочки: appearance:none выше стирает системный вид,
+   поэтому рисуем состояние «выбрано» сами */
+input[type="radio"], input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex-shrink: 0;
+  border: 2px solid #46505f;
+  background: transparent;
+  position: relative;
+  cursor: pointer;
+}
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"] { border-radius: 7px; }
+input[type="radio"]:checked, input[type="checkbox"]:checked {
+  border-color: var(--accent);
+}
+input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px; top: 3px; right: 3px; bottom: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 6px; top: 2px;
+  width: 5px; height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
 /* ---------- каркас ---------- */
 
 #screen {

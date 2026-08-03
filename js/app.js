@@ -357,7 +357,7 @@ function renderSettings() {
       <label>Счёт для импорта</label>
       ${state.mono.accounts.map((a, i) => `
         <label style="display:flex;align-items:center;gap:10px;padding:8px 2px;font-size:15px;color:${a.supported ? 'var(--text)' : 'var(--muted)'}">
-          <input type="radio" name="mono-acc" value="${esc(a.id)}" style="width:auto" ${i === firstSupported ? 'checked' : ''} ${a.supported ? '' : 'disabled'}>
+          <input type="radio" name="mono-acc" value="${esc(a.id)}" ${i === firstSupported ? 'checked' : ''} ${a.supported ? '' : 'disabled'}>
           ${esc(a.maskedPan)} · ${esc(a.currency)}${a.type ? ' · ' + esc(a.type) : ''}${a.supported ? '' : ' (не поддерживается)'}
         </label>`).join('')}
     </div>
@@ -611,7 +611,7 @@ function openSubForm(sub) {
       ${isNew ? '' : `
       <div class="field">
         <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
-          <input id="sub-active" type="checkbox" style="width:auto" ${s.active !== false ? 'checked' : ''}>
+          <input id="sub-active" type="checkbox" ${s.active !== false ? 'checked' : ''}>
           Подписка активна
         </label>
       </div>`}
@@ -685,7 +685,7 @@ function openDebtForm(debt) {
       ${isNew ? '' : `
       <div class="field">
         <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
-          <input id="debt-settled" type="checkbox" style="width:auto" ${d.settled ? 'checked' : ''}>
+          <input id="debt-settled" type="checkbox" ${d.settled ? 'checked' : ''}>
           Долг погашен
         </label>
       </div>`}
@@ -1035,10 +1035,18 @@ fabEl.addEventListener('click', () => {
 
 /* ================= запуск ================= */
 
-// Реальная высота экрана: vh/dvh в standalone-режиме iOS считаются
-// без области статус-бара, поэтому меряем окно в JS.
+// Реальная высота приложения. В standalone-режиме iOS webview занимает
+// весь экран, но innerHeight и vh/dvh занижены на высоту статус-бара —
+// поэтому для установленной PWA берём физическую высоту экрана.
 function setAppHeight() {
-  document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
+  let h = window.innerHeight;
+  if (navigator.standalone === true) {
+    const portrait = matchMedia('(orientation: portrait)').matches;
+    h = portrait
+      ? Math.max(screen.height, screen.width)
+      : Math.min(screen.height, screen.width);
+  }
+  document.documentElement.style.setProperty('--app-h', h + 'px');
 }
 window.addEventListener('resize', setAppHeight);
 window.addEventListener('orientationchange', setAppHeight);
