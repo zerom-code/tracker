@@ -100,24 +100,24 @@ function categoryForMcc(mcc) {
 }
 
 /**
- * Импорт выписки за N дней. Берём только списания (amount < 0),
- * дубликаты отсекаем по id операции Монобанка.
+ * Импорт выписки за период [fromSec, toSec] (unix-секунды).
+ * Monobank отдаёт максимум 31 день + 1 час за один запрос.
+ * Берём только списания (amount < 0), дубликаты отсекаем по id операции.
  */
-async function monoImport(accountId, days) {
+async function monoImport(accountId, fromSec, toSec) {
   const account = state.mono.accounts.find((a) => a.id === accountId);
   if (!account) throw new Error('Счёт не найден — переподключите Monobank');
   if (!account.supported) throw new Error('Поддерживаются только счета в гривне и долларах');
 
-  const to = Math.floor(Date.now() / 1000);
-  const from = to - days * 86400;
-  const items = await monoFetch('/personal/statement/' + accountId + '/' + from + '/' + to);
+  const items = await monoFetch('/personal/statement/' + accountId + '/' + fromSec + '/' + toSec);
 
   const known = new Set(state.transactions.map((t) => t.sourceId).filter(Boolean));
+  const deleted = new Set(state.monoDeleted || []);
   let added = 0, incomes = 0, duplicates = 0;
 
   for (const it of items) {
     if (it.amount >= 0) { incomes++; continue; }
-    if (known.has(it.id)) { duplicates++; continue; }
+    if (known.has(it.id) || deleted.has(it.id)) { duplicates++; continue; }
     const isTransfer = TRANSFER_MCC.includes(it.mcc);
     state.transactions.push({
       id: uid(),

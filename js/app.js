@@ -366,7 +366,21 @@ function renderSettings() {
       <select id="mono-days">
         <option value="7">последние 7 дней</option>
         <option value="31" selected>последние 31 день</option>
+        <option value="custom">выбрать даты…</option>
       </select>
+    </div>
+    <div id="mono-custom" hidden>
+      <div class="field-split">
+        <div class="field">
+          <label>С даты</label>
+          <input id="mono-from" type="date" value="${todayISO()}">
+        </div>
+        <div class="field">
+          <label>По дату</label>
+          <input id="mono-to" type="date" value="${todayISO()}">
+        </div>
+      </div>
+      <p class="hint" style="margin:0 0 10px">Для одного дня укажите одинаковые даты. Monobank отдаёт максимум 31 день за один запрос.</p>
     </div>
     <button class="btn" data-action="mono-import">Импортировать операции</button>
     <button class="btn danger-ghost" data-action="mono-disconnect">Отключить Monobank</button>
@@ -527,6 +541,7 @@ function openTxForm(tx) {
       </div>
       <button type="submit" class="btn">${isNew ? 'Добавить' : 'Сохранить'}</button>
       ${isNew ? '' : `<button type="button" class="btn danger-ghost" data-action="del-tx" data-id="${tx.id}">Удалить операцию</button>`}
+      ${t.source === 'mono' ? '<p class="hint" style="text-align:center">Импортировано из Monobank — правки не затирают её при повторном импорте</p>' : ''}
     </form>
   `);
 }
@@ -786,13 +801,38 @@ async function handleMonoConnect(btn) {
   }
 }
 
+function monoImportRange() {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const sel = document.getElementById('mono-days').value;
+  if (sel !== 'custom') {
+    const days = Number(sel) || 31;
+    return { fromSec: nowSec - days * 86400, toSec: nowSec };
+  }
+  const fromISO = document.getElementById('mono-from').value;
+  const toISO = document.getElementById('mono-to').value;
+  if (!fromISO || !toISO) throw new Error('Укажите обе даты периода');
+  if (fromISO > toISO) throw new Error('Дата «с» позже даты «по»');
+  if (daysBetween(fromISO, toISO) > 30) throw new Error('Monobank отдаёт максимум 31 день за один запрос — выберите период короче');
+  const fromSec = Math.floor(parseISO(fromISO).getTime() / 1000);
+  if (fromSec > nowSec) throw new Error('Период ещё не наступил');
+  // конец дня «по дату», но не позже текущего момента
+  const toSec = Math.min(Math.floor(parseISO(toISO).getTime() / 1000) + 86399, nowSec);
+  return { fromSec, toSec };
+}
+
 async function handleMonoImport(btn) {
   const acc = document.querySelector('input[name="mono-acc"]:checked');
   if (!acc) { toast('Выберите счёт'); return; }
-  const days = Number(document.getElementById('mono-days').value) || 31;
+  let range;
+  try {
+    range = monoImportRange();
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
   btn.disabled = true; btn.textContent = 'Импортируем…';
   try {
-    const r = await monoImport(acc.value, days);
+    const r = await monoImport(acc.value, range.fromSec, range.toSec);
     render();
     toast(r.added
       ? `Добавлено операций: ${r.added}` + (r.duplicates ? `, пропущено дублей: ${r.duplicates}` : '')
@@ -896,6 +936,8 @@ document.addEventListener('click', (e) => {
 
     case 'del-tx':
       if (confirm('Удалить операцию?')) {
+        const tx = state.transactions.find((t) => t.id === id);
+        if (tx && tx.sourceId) state.monoDeleted.push(tx.sourceId);
         state.transactions = state.transactions.filter((t) => t.id !== id);
         save(); closeSheet(); render();
       }
@@ -979,6 +1021,10 @@ document.addEventListener('change', (e) => {
     importDataFile(e.target.files[0]);
     e.target.value = '';
   }
+  if (e.target && e.target.id === 'mono-days') {
+    const custom = document.getElementById('mono-custom');
+    if (custom) custom.hidden = e.target.value !== 'custom';
+  }
 });
 
 fabEl.addEventListener('click', () => {
@@ -988,6 +1034,15 @@ fabEl.addEventListener('click', () => {
 });
 
 /* ================= запуск ================= */
+
+// Реальная высота экрана: vh/dvh в standalone-режиме iOS считаются
+// без области статус-бара, поэтому меряем окно в JS.
+function setAppHeight() {
+  document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
+}
+window.addEventListener('resize', setAppHeight);
+window.addEventListener('orientationchange', setAppHeight);
+setAppHeight();
 
 const initialScreen = location.hash.replace('#', '');
 if (['home', 'ops', 'subs', 'debts', 'settings'].includes(initialScreen)) {

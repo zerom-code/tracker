@@ -31,6 +31,7 @@ function defaultState() {
     subscriptions: [], // {id, name, amount, currency, period:'month'|'year', nextDate, active}
     debts: [],         // {id, direction:'i-owe'|'owe-me', person, amount, currency, description, date, settled}
     mono: { clientName: '', accounts: [] },
+    monoDeleted: [],   // id операций Monobank, удалённых вручную — не возвращать при импорте
   };
 }
 
@@ -50,6 +51,7 @@ function load() {
       transactions: data.transactions || [],
       subscriptions: data.subscriptions || [],
       debts: data.debts || [],
+      monoDeleted: data.monoDeleted || [],
     };
   } catch (e) {
     console.error('Не удалось прочитать данные', e);
