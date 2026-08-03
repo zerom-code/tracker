@@ -120,7 +120,18 @@ input[type="checkbox"]:checked::after {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
-  padding: 14px 16px 100px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px 100px;
+}
+
+/* подложка под статус-бар айфона, чтобы контент не просвечивал под часами */
+.statusbar-shim {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: env(safe-area-inset-top);
+  background: rgba(14, 17, 22, 0.88);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  z-index: 45;
 }
 
 .screen-title {

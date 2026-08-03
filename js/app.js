@@ -516,7 +516,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 8</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 9</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1454,10 +1454,20 @@ fabEl.addEventListener('click', () => {
 
 /* ================= запуск ================= */
 
-// Высота видимой области. visualViewport точнее innerHeight: он учитывает
-// и клавиатуру, поэтому лист ужимается, а не уезжает под неё.
+// Высота приложения. В standalone-режиме iOS вебвью занимает весь экран,
+// но innerHeight и visualViewport занижены на высоту статус-бара — для
+// установленной PWA единственный честный источник — физический размер экрана.
+// В обычном браузере, наоборот, честен visualViewport.
 function setAppHeight() {
-  const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  let h;
+  if (navigator.standalone === true) {
+    const portrait = matchMedia('(orientation: portrait)').matches;
+    h = portrait
+      ? Math.max(screen.height, screen.width)
+      : Math.min(screen.height, screen.width);
+  } else {
+    h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  }
   document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
 }
 window.addEventListener('resize', setAppHeight);
