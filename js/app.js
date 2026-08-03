@@ -7,6 +7,7 @@ const ui = {
   opsY: now.getFullYear(),
   opsM: now.getMonth(),
   debtsTab: 'owe-me',          // owe-me | i-owe
+  showDiag: false,
 };
 
 const MONTHS_RU_PREP = ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне',
@@ -65,6 +66,7 @@ function renderHome() {
 
   const subsMonthly = activeSubs().reduce((acc, s) => acc + subMonthlyBase(s), 0);
   const subs = moneyBoth(subsMonthly);
+  const creditsLeft = creditsRemainingBase();
 
   const oweMe = moneyBoth(activeDebts('owe-me').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
   const iOwe = moneyBoth(activeDebts('i-owe').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
@@ -101,9 +103,9 @@ function renderHome() {
 
     <div class="stat-grid" style="margin-bottom:12px">
       <div class="card">
-        <div class="stat-label">Подписки в месяц</div>
+        <div class="stat-label">Платежи в месяц</div>
         <div class="stat-value">${subs.main}</div>
-        <div class="row-sub">≈ ${subs.other}</div>
+        <div class="row-sub">${creditsLeft > 0 ? 'выплатить ещё ' + fmtMoney(creditsLeft, state.settings.baseCurrency) : '≈ ' + subs.other}</div>
       </div>
       <div class="card">
         <div class="stat-label">Курс доллара</div>
@@ -138,7 +140,7 @@ function renderHome() {
 
     ${upcoming.length ? `
     <div class="card">
-      <h3>Ближайшие подписки</h3>
+      <h3>Ближайшие платежи</h3>
       ${upcoming.map(subRow).join('')}
     </div>` : ''}
 
@@ -246,20 +248,25 @@ function subRow(s) {
   const d = parseISO(s.nextDate);
   const dateStr = d.getDate() + ' ' + MONTHS_RU_GEN[d.getMonth()];
   const payBtn = days <= 0
-    ? `<button class="icon-btn ok" data-action="pay-sub" data-id="${s.id}" title="Отметить оплаченной">✓</button>`
+    ? `<button class="icon-btn ok" data-action="pay-sub" data-id="${s.id}" title="Отметить оплаченным">✓</button>`
     : '';
+
+  const credit = isCredit(s);
+  const nextNo = Math.min(s.plan ? s.plan.paid + 1 : 0, s.plan ? s.plan.total : 0);
+  const pct = credit ? Math.round(s.plan.paid / s.plan.total * 100) : 0;
 
   return `
     <div class="row" data-action="edit-sub" data-id="${s.id}">
-      <div class="row-emoji">🔁</div>
+      <div class="row-emoji">${credit ? '💳' : '🔁'}</div>
       <div class="row-main">
         <div class="row-title">${esc(s.name)}</div>
-        <div class="row-sub">${badge} ${dateStr} · ${s.period === 'year' ? 'ежегодно' : 'ежемесячно'}</div>
+        <div class="row-sub${credit ? ' wrap' : ''}">${badge} ${dateStr}${credit ? ` · платёж ${nextNo} из ${s.plan.total}` : ` · ${s.period === 'year' ? 'ежегодно' : 'ежемесячно'}`}</div>
+        ${credit ? `<div class="cat-bar-track" style="margin-top:6px"><div class="cat-bar-fill" style="width:${Math.max(2, pct)}%"></div></div>` : ''}
       </div>
       <div class="inline-actions">
         <div class="row-right">
           <div class="row-amount">${fmtMoney(s.amount, s.currency)}</div>
-          <div class="row-sub">${s.period === 'year' ? '/год' : '/мес'}</div>
+          <div class="row-sub">${credit ? 'ост. ' + fmtMoney(creditRemaining(s), s.currency) : (s.period === 'year' ? '/год' : '/мес')}</div>
         </div>
         ${payBtn}
       </div>
@@ -267,37 +274,58 @@ function subRow(s) {
 }
 
 function renderSubs() {
-  const act = activeSubs().slice().sort((a, b) => (a.nextDate < b.nextDate ? -1 : 1));
+  const byDate = (a, b) => (a.nextDate < b.nextDate ? -1 : 1);
+  const subs = activePlainSubs().slice().sort(byDate);
+  const credits = activeCredits().slice().sort(byDate);
   const paused = state.subscriptions.filter((s) => s.active === false);
-  const monthly = moneyBoth(act.reduce((acc, s) => acc + subMonthlyBase(s), 0));
+
+  const monthly = moneyBoth(activeSubs().reduce((acc, s) => acc + subMonthlyBase(s), 0));
+  const remaining = moneyBoth(creditsRemainingBase());
 
   return `
-    <h1 class="screen-title">Подписки</h1>
+    <h1 class="screen-title">Платежи</h1>
 
     <div class="card">
       <h3>В месяц</h3>
       <div class="big-amount">${monthly.main}</div>
       <div class="sub-amount">≈ ${monthly.other}</div>
+      ${credits.length ? `
+      <div class="divider"></div>
+      <div class="rate-line">
+        <span style="color:var(--muted);font-size:14px">Осталось выплатить</span>
+        <span style="font-weight:700">${remaining.main}</span>
+      </div>` : ''}
     </div>
 
-    ${act.length ? `<div class="card" style="padding:4px 16px">${act.map(subRow).join('')}</div>` : `
+    ${credits.length ? `
+    <div class="group-label">Кредиты и рассрочки</div>
+    <div class="card" style="padding:4px 16px">${credits.map(subRow).join('')}</div>` : ''}
+
+    ${subs.length ? `
+    ${credits.length ? '<div class="group-label">Подписки</div>' : ''}
+    <div class="card" style="padding:4px 16px">${subs.map(subRow).join('')}</div>` : ''}
+
+    ${!subs.length && !credits.length ? `
     <div class="empty">
       <div class="empty-icon">🔁</div>
-      Добавьте подписки кнопкой «+»:<br>Netflix, iCloud, Spotify — всё, что списывается регулярно.
-    </div>`}
+      Добавьте кнопкой «+» подписки (Netflix, iCloud)<br>или рассрочку с фиксированным платежом.
+    </div>` : ''}
 
     ${paused.length ? `
-    <div class="group-label">Приостановленные</div>
+    <div class="group-label">Закрытые и приостановленные</div>
     <div class="card" style="padding:4px 16px">
       ${paused.map((s) => `
       <div class="row settled" data-action="edit-sub" data-id="${s.id}">
-        <div class="row-emoji">⏸️</div>
-        <div class="row-main"><div class="row-title">${esc(s.name)}</div></div>
+        <div class="row-emoji">${isCredit(s) ? '✅' : '⏸️'}</div>
+        <div class="row-main">
+          <div class="row-title">${esc(s.name)}</div>
+          ${isCredit(s) ? `<div class="row-sub">выплачено ${s.plan.paid} из ${s.plan.total}</div>` : ''}
+        </div>
         <div class="row-right"><div class="row-amount">${fmtMoney(s.amount, s.currency)}</div></div>
       </div>`).join('')}
     </div>` : ''}
 
-    <p class="hint">Когда подходит дата — нажмите «✓», подписка запишется в расходы, а дата сдвинется на следующий период.</p>
+    <p class="hint">Когда подходит дата — нажмите «✓»: платёж запишется в расходы, а дата сдвинется. У рассрочки счётчик платежей увеличится, и после последнего она закроется сама.</p>
   `;
 }
 
@@ -349,6 +377,19 @@ function renderDebts() {
       <div class="big-amount ${dir === 'owe-me' ? 'stat-value green' : 'stat-value red'}" style="font-size:30px">${total.main}</div>
       <div class="sub-amount">≈ ${total.other}</div>
     </div>
+
+    ${dir === 'i-owe' && creditsRemainingBase() > 0 ? `
+    <button class="card row" data-nav="subs" style="width:100%;padding:12px 16px">
+      <div class="row-emoji">💳</div>
+      <div class="row-main">
+        <div class="row-title">Кредиты и рассрочки</div>
+        <div class="row-sub">${activeCredits().length} ${activeCredits().length === 1 ? 'платёж' : 'платежа(ей)'} · открыть</div>
+      </div>
+      <div class="row-right">
+        <div class="row-amount negative">${fmtMoney(creditsRemainingBase(), state.settings.baseCurrency)}</div>
+        <div class="row-sub">осталось</div>
+      </div>
+    </button>` : ''}
 
     ${active.length ? `<div class="card" style="padding:4px 16px">${active.map(debtRow).join('')}</div>` : `
     <div class="empty">
@@ -474,7 +515,55 @@ function renderSettings() {
       <button class="btn danger-ghost" data-action="wipe-data">Удалить все данные</button>
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
+
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 8</p>
+    ${ui.showDiag ? `
+    <div class="card">
+      <h3>Диагностика экрана</h3>
+      <div class="diag">${diagLines().map((l) => `<div>${esc(l)}</div>`).join('')}</div>
+      <button class="btn secondary" data-action="tap-test" style="margin-top:10px">Тест тапа</button>
+      <p class="hint">Если тап «промахивается», разница между координатами нажатия и клика покажет сдвиг.</p>
+    </div>` : ''}
   `;
+}
+
+function diagLines() {
+  const vv = window.visualViewport;
+  const cs = getComputedStyle(document.documentElement);
+  return [
+    'innerHeight: ' + window.innerHeight,
+    'screen.height: ' + screen.height,
+    'visualViewport: ' + (vv ? Math.round(vv.height) + ' (offsetTop ' + Math.round(vv.offsetTop) + ')' : 'нет'),
+    '--app-h: ' + cs.getPropertyValue('--app-h').trim(),
+    'body height: ' + Math.round(document.body.getBoundingClientRect().height),
+    'standalone: ' + (navigator.standalone === true ? 'да' : 'нет'),
+    'safe-area top/bottom: ' + safeArea('top') + ' / ' + safeArea('bottom'),
+  ];
+}
+
+function safeArea(side) {
+  const probe = document.createElement('div');
+  probe.style.cssText = `position:fixed;height:env(safe-area-inset-${side});visibility:hidden`;
+  document.body.appendChild(probe);
+  const v = Math.round(probe.getBoundingClientRect().height);
+  probe.remove();
+  return v + 'px';
+}
+
+/* Показывает, куда пришлось нажатие и куда — клик. Расхождение = тот самый сдвиг. */
+function runTapTest(btn) {
+  let down = null;
+  btn.textContent = 'Нажмите сюда ещё раз';
+  const onDown = (e) => { down = { x: Math.round(e.clientX), y: Math.round(e.clientY) }; };
+  const onClick = (e) => {
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    btn.removeEventListener('pointerdown', onDown);
+    btn.removeEventListener('click', onClick);
+    btn.textContent = 'Тест тапа';
+    toast(`press: ${down ? down.x + ',' + down.y : '—'}\nclick: ${Math.round(e.clientX)},${Math.round(e.clientY)}\nпопал в: ${hit ? hit.tagName.toLowerCase() : '?'}`);
+  };
+  btn.addEventListener('pointerdown', onDown);
+  btn.addEventListener('click', onClick);
 }
 
 /* ================= модальные формы ================= */
@@ -598,15 +687,17 @@ function openSubForm(sub) {
   const isNew = !sub;
   const s = sub || {
     name: '', amount: '', currency: 'USD', period: 'month',
-    nextDate: todayISO(), active: true,
+    nextDate: todayISO(), active: true, plan: null,
   };
+  const credit = isCredit(s);
+  const title = isNew ? 'Новый платёж' : (credit ? 'Изменить рассрочку' : 'Изменить подписку');
 
   openSheet(`
-    ${sheetHead(isNew ? 'Новая подписка' : 'Изменить подписку')}
+    ${sheetHead(title)}
     <form id="sheet-form" data-form="sub" data-id="${sub ? sub.id : ''}">
       <div class="field">
         <label>Название</label>
-        <input id="sub-name" type="text" placeholder="Netflix, iCloud…" value="${esc(s.name)}" required>
+        <input id="sub-name" type="text" placeholder="${credit ? 'iPhone в рассрочку…' : 'Netflix, iCloud…'}" value="${esc(s.name)}" required>
       </div>
       <div class="field">
         <label>Сумма</label>
@@ -627,15 +718,39 @@ function openSubForm(sub) {
         <label>Дата следующего списания</label>
         <input id="sub-date" type="date" value="${s.nextDate}" required>
       </div>
+
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
+          <input id="sub-is-credit" type="checkbox" ${credit ? 'checked' : ''}>
+          Это рассрочка или кредит
+        </label>
+      </div>
+      <div id="sub-plan" ${credit ? '' : 'hidden'}>
+        <div class="field">
+          <label>Кому платим</label>
+          <input id="sub-lender" type="text" placeholder="например: Monobank" value="${credit ? esc(s.plan.lender || '') : ''}">
+        </div>
+        <div class="field-split">
+          <div class="field">
+            <label>Всего платежей</label>
+            <input id="sub-total" type="text" inputmode="numeric" placeholder="12" value="${credit ? s.plan.total : ''}">
+          </div>
+          <div class="field">
+            <label>Уже оплачено</label>
+            <input id="sub-paid" type="text" inputmode="numeric" placeholder="0" value="${credit ? s.plan.paid : ''}">
+          </div>
+        </div>
+      </div>
+
       ${isNew ? '' : `
       <div class="field">
         <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
           <input id="sub-active" type="checkbox" ${s.active !== false ? 'checked' : ''}>
-          Подписка активна
+          Активен
         </label>
       </div>`}
       <button type="submit" class="btn">${isNew ? 'Добавить' : 'Сохранить'}</button>
-      ${isNew ? '' : `<button type="button" class="btn danger-ghost" data-action="del-sub" data-id="${sub.id}">Удалить подписку</button>`}
+      ${isNew ? '' : `<button type="button" class="btn danger-ghost" data-action="del-sub" data-id="${sub.id}">Удалить</button>`}
     </form>
   `);
 }
@@ -643,10 +758,20 @@ function openSubForm(sub) {
 function submitSubForm(form) {
   const name = document.getElementById('sub-name').value.trim();
   const amount = parseAmount(document.getElementById('sub-amount').value);
-  if (!name) { toast('Укажите название подписки'); return; }
+  if (!name) { toast('Укажите название'); return; }
   if (!amount) { toast('Введите сумму больше нуля'); return; }
+
+  let plan = null;
+  if (document.getElementById('sub-is-credit').checked) {
+    const total = parseInt(document.getElementById('sub-total').value, 10);
+    const paid = parseInt(document.getElementById('sub-paid').value, 10) || 0;
+    if (!(total >= 1)) { toast('Укажите, сколько всего платежей'); return; }
+    if (paid < 0 || paid > total) { toast('Оплачено не может быть больше, чем всего платежей'); return; }
+    plan = { total, paid, lender: document.getElementById('sub-lender').value.trim() };
+  }
+
   const data = {
-    name, amount,
+    name, amount, plan,
     currency: segValue('#sub-cur-seg') || 'USD',
     period: segValue('#sub-period-seg') || 'month',
     nextDate: document.getElementById('sub-date').value || todayISO(),
@@ -978,15 +1103,29 @@ function submitCategoryForm(form) {
 function paySubscription(id) {
   const s = state.subscriptions.find((x) => x.id === id);
   if (!s) return;
+  const credit = isCredit(s);
   state.transactions.push({
     id: uid(), ts: Date.now(), type: 'expense',
     amount: s.amount, currency: s.currency,
-    categoryId: 'subs', description: s.name,
+    categoryId: credit ? 'credit' : 'subs', description: s.name,
     date: todayISO(), source: 'manual', sourceId: null,
   });
+
+  if (credit) {
+    s.plan.paid = Math.min(s.plan.paid + 1, s.plan.total);
+    if (s.plan.paid >= s.plan.total) {
+      s.active = false;
+      save(); render();
+      toast(`«${s.name}» выплачено полностью 🎉`);
+      return;
+    }
+  }
+
   s.nextDate = addPeriod(s.nextDate, s.period);
   save(); render();
-  toast('Записано в расходы, дата сдвинута');
+  toast(credit
+    ? `Платёж ${s.plan.paid} из ${s.plan.total} записан`
+    : 'Записано в расходы, дата сдвинута');
 }
 
 async function handleRateRefresh(btn) {
@@ -1096,6 +1235,24 @@ function importDataFile(file) {
 }
 
 /* ================= обработчики событий ================= */
+
+/* Защита от «фантомного» тапа: если между нажатием и отпусканием вёрстка
+   сдвинулась (закрылась клавиатура, ужался лист), click прилетает в другой
+   элемент — например в поле даты над кнопкой. Такой клик гасим в capture-фазе,
+   иначе системный пикер даты успеет открыться. */
+let pressTarget = null;
+document.addEventListener('pointerdown', (e) => { pressTarget = e.target; }, true);
+document.addEventListener('click', (e) => {
+  const pressed = pressTarget;
+  pressTarget = null;
+  if (e.detail === 0 || !pressed) return; // submit с клавиатуры — не трогаем
+  const related = pressed === e.target ||
+    pressed.contains(e.target) || e.target.contains(pressed);
+  if (!related) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}, true);
 
 document.addEventListener('click', (e) => {
   const navBtn = e.target.closest('[data-nav]');
@@ -1243,6 +1400,9 @@ document.addEventListener('click', (e) => {
       }
       break;
 
+    case 'diag-toggle': ui.showDiag = !ui.showDiag; render(); break;
+    case 'tap-test': runTapTest(el); break;
+
     case 'export-data': exportData(); break;
     case 'wipe-data':
       if (confirm('Удалить ВСЕ данные без возможности восстановления?')) {
@@ -1280,6 +1440,10 @@ document.addEventListener('change', (e) => {
     const custom = document.getElementById('mono-custom');
     if (custom) custom.hidden = e.target.value !== 'custom';
   }
+  if (e.target && e.target.id === 'sub-is-credit') {
+    const plan = document.getElementById('sub-plan');
+    if (plan) plan.hidden = !e.target.checked;
+  }
 });
 
 fabEl.addEventListener('click', () => {
@@ -1290,21 +1454,17 @@ fabEl.addEventListener('click', () => {
 
 /* ================= запуск ================= */
 
-// Реальная высота приложения. В standalone-режиме iOS webview занимает
-// весь экран, но innerHeight и vh/dvh занижены на высоту статус-бара —
-// поэтому для установленной PWA берём физическую высоту экрана.
+// Высота видимой области. visualViewport точнее innerHeight: он учитывает
+// и клавиатуру, поэтому лист ужимается, а не уезжает под неё.
 function setAppHeight() {
-  let h = window.innerHeight;
-  if (navigator.standalone === true) {
-    const portrait = matchMedia('(orientation: portrait)').matches;
-    h = portrait
-      ? Math.max(screen.height, screen.width)
-      : Math.min(screen.height, screen.width);
-  }
-  document.documentElement.style.setProperty('--app-h', h + 'px');
+  const h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
 }
 window.addEventListener('resize', setAppHeight);
 window.addEventListener('orientationchange', setAppHeight);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setAppHeight);
+}
 setAppHeight();
 
 const initialScreen = location.hash.replace('#', '');

@@ -11,6 +11,7 @@ const DEFAULT_CATEGORIES = [
   { id: 'fun', name: 'Развлечения', emoji: '🎮' },
   { id: 'clothes', name: 'Одежда', emoji: '👕' },
   { id: 'subs', name: 'Подписки', emoji: '📺' },
+  { id: 'credit', name: 'Кредиты и рассрочки', emoji: '💳' },
   { id: 'connection', name: 'Связь и интернет', emoji: '📱' },
   { id: 'education', name: 'Образование', emoji: '📚' },
   { id: 'other', name: 'Другое', emoji: '✨' },
@@ -28,7 +29,8 @@ function defaultState() {
     rate: { usdUah: 42, updatedAt: 0, source: 'по умолчанию' },
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     transactions: [],  // {id, ts, type:'expense'|'transfer', amount, currency, categoryId, description, date, source, sourceId}
-    subscriptions: [], // {id, name, amount, currency, period:'month'|'year', nextDate, active}
+    // подписка с plan — это рассрочка/кредит: конечное число платежей
+    subscriptions: [], // {id, name, amount, currency, period:'month'|'year', nextDate, active, plan:{total,paid,lender}|null}
     // долг — контейнер: entries (за что, сколько) + payments (погашения)
     debts: [],         // {id, direction:'i-owe'|'owe-me', person, currency, date, settled, entries:[{id,amount,description,date}], payments:[{id,amount,date,note}]}
     mono: { clientName: '', accounts: [] },
@@ -48,9 +50,9 @@ function load() {
       settings: { ...base.settings, ...(data.settings || {}) },
       rate: { ...base.rate, ...(data.rate || {}) },
       mono: { ...base.mono, ...(data.mono || {}) },
-      categories: Array.isArray(data.categories) && data.categories.length ? data.categories : base.categories,
+      categories: mergeCategories(data.categories, base.categories),
       transactions: data.transactions || [],
-      subscriptions: data.subscriptions || [],
+      subscriptions: (data.subscriptions || []).map(normalizeSub),
       debts: (data.debts || []).map(normalizeDebt),
       monoDeleted: data.monoDeleted || [],
     };
@@ -58,6 +60,15 @@ function load() {
     console.error('Не удалось прочитать данные', e);
     return defaultState();
   }
+}
+
+/* Сохраняем категории пользователя, но дополняем недостающими служебными
+   (например «Кредиты и рассрочки», появившейся в новой версии). */
+function mergeCategories(saved, base) {
+  if (!Array.isArray(saved) || !saved.length) return base;
+  const have = new Set(saved.map((c) => c.id));
+  const missing = base.filter((c) => c.id === 'credit' && !have.has(c.id));
+  return missing.length ? [...saved, ...missing] : saved;
 }
 
 let state = load();
@@ -182,6 +193,35 @@ function subMonthlyBase(sub) {
 
 function activeSubs() {
   return state.subscriptions.filter((s) => s.active !== false);
+}
+
+/* ---------- кредиты и рассрочки ---------- */
+
+/* Миграция: у подписок, заведённых до появления рассрочек, плана платежей нет */
+function normalizeSub(s) {
+  return { plan: null, ...s };
+}
+
+function isCredit(s) {
+  return !!(s.plan && s.plan.total > 0);
+}
+
+/* Сколько ещё предстоит выплатить по рассрочке (в её валюте) */
+function creditRemaining(s) {
+  if (!isCredit(s)) return 0;
+  return s.amount * Math.max(0, s.plan.total - s.plan.paid);
+}
+
+function activeCredits() {
+  return activeSubs().filter(isCredit);
+}
+
+function activePlainSubs() {
+  return activeSubs().filter((s) => !isCredit(s));
+}
+
+function creditsRemainingBase() {
+  return activeCredits().reduce((acc, s) => acc + toBase(creditRemaining(s), s.currency), 0);
 }
 
 /* Миграция старого плоского формата долга в контейнер с записями */
