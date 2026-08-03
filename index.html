@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Трекер трат</title>
+<meta name="description" content="Личный трекер расходов: подписки, переводы, долги, курс валют и импорт из Monobank. Все данные хранятся только на вашем устройстве.">
+<meta name="theme-color" content="#0e1116">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Траты">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<main id="screen"></main>
+
+<button id="fab" class="fab" hidden aria-label="Добавить">+</button>
+
+<nav class="tabbar">
+  <button data-nav="home"><span class="tab-icon">📊</span>Главная</button>
+  <button data-nav="ops"><span class="tab-icon">🧾</span>Операции</button>
+  <button data-nav="subs"><span class="tab-icon">🔁</span>Подписки</button>
+  <button data-nav="debts"><span class="tab-icon">🤝</span>Долги</button>
+  <button data-nav="settings"><span class="tab-icon">⚙️</span>Ещё</button>
+</nav>
+
+<div id="modal-root"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/store.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

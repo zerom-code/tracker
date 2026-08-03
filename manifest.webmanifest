@@ -1,0 +1,16 @@
+{
+  "name": "Трекер трат",
+  "short_name": "Траты",
+  "description": "Личный трекер расходов: подписки, переводы, долги, импорт из Monobank",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e1116",
+  "theme_color": "#0e1116",
+  "icons": [
+    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
