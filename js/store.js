@@ -193,6 +193,16 @@ function txOfMonth(year, month, type) {
     t.date.startsWith(prefix) && (!type || t.type === type));
 }
 
+/* Расход — это все деньги, ушедшие со счёта: и траты, и переводы.
+   Переводы дополнительно показываются отдельной строкой внутри этой суммы. */
+function outflowOfMonth(year, month) {
+  return txOfMonth(year, month).filter((t) => t.type === 'expense' || t.type === 'transfer');
+}
+
+function isOutflow(t) {
+  return t.type === 'expense' || t.type === 'transfer';
+}
+
 function sumBase(list) {
   return list.reduce((acc, t) => acc + toBase(t.amount, t.currency), 0);
 }

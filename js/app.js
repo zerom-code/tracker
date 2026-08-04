@@ -13,6 +13,9 @@ const ui = {
 const MONTHS_RU_PREP = ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне',
   'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'];
 
+/* Псевдокатегория для строки «Переводы» в разбивке за месяц */
+const TRANSFERS_ROW = '__transfers';
+
 const screenEl = document.getElementById('screen');
 const fabEl = document.getElementById('fab');
 const modalRoot = document.getElementById('modal-root');
@@ -59,7 +62,7 @@ function render() {
 
 function renderHome() {
   const y = now.getFullYear(), m = now.getMonth();
-  const spentBase = sumBase(txOfMonth(y, m, 'expense'));
+  const spentBase = sumBase(outflowOfMonth(y, m)); // траты вместе с переводами
   const transfersBase = sumBase(txOfMonth(y, m, 'transfer'));
   const incomeBase = sumBase(txOfMonth(y, m, 'income'));
   const spent = moneyBoth(spentBase);
@@ -71,13 +74,15 @@ function renderHome() {
   const oweMe = moneyBoth(activeDebts('owe-me').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
   const iOwe = moneyBoth(activeDebts('i-owe').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
 
-  // топ категорий месяца
+  // топ категорий месяца; переводы идут отдельной строкой, чтобы сумма
+  // столбиков сходилась с итогом расходов
   const byCat = {};
   for (const t of txOfMonth(y, m, 'expense')) {
     const id = t.categoryId || FALLBACK_CATEGORY;
     byCat[id] = (byCat[id] || 0) + toBase(t.amount, t.currency);
   }
-  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (transfersBase > 0) byCat[TRANSFERS_ROW] = transfersBase;
+  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 7);
   const maxCat = cats.length ? cats[0][1] : 1;
 
   const upcoming = activeSubs()
@@ -96,8 +101,8 @@ function renderHome() {
         <span style="font-weight:700;color:var(--green)">+${fmtMoney(incomeBase, state.settings.baseCurrency)}</span>
       </div>
       <div class="rate-line" style="margin-top:6px">
-        <span style="color:var(--muted);font-size:14px">Переводы за месяц</span>
-        <span style="font-weight:700">${fmtMoney(transfersBase, state.settings.baseCurrency)}</span>
+        <span style="color:var(--muted);font-size:14px">Из них переводы</span>
+        <span style="font-weight:700;color:var(--accent)">${fmtMoney(transfersBase, state.settings.baseCurrency)}</span>
       </div>
     </div>
 
@@ -126,7 +131,7 @@ function renderHome() {
     <div class="card">
       <h3>Категории за месяц</h3>
       ${cats.map(([id, sum]) => {
-        const c = categoryById(id);
+        const c = id === TRANSFERS_ROW ? { emoji: '🔁', name: 'Переводы' } : categoryById(id);
         return `
         <div class="cat-bar">
           <div class="cat-bar-top">
@@ -157,11 +162,14 @@ function renderHome() {
 
 function renderOps() {
   const { opsY: y, opsM: m } = ui;
-  const monthTx = txOfMonth(y, m).filter((t) => ui.opsFilter === 'all' || t.type === ui.opsFilter);
+  // «Расходы» показывают и переводы — они тоже расход, просто отдельного вида
+  const matchesFilter = (t) => ui.opsFilter === 'all' ||
+    (ui.opsFilter === 'expense' ? isOutflow(t) : t.type === ui.opsFilter);
+  const monthTx = txOfMonth(y, m).filter(matchesFilter);
   const sorted = monthTx.sort((a, b) =>
     a.date === b.date ? (b.ts || 0) - (a.ts || 0) : (a.date < b.date ? 1 : -1));
 
-  const expSum = sumBase(txOfMonth(y, m, 'expense'));
+  const expSum = sumBase(outflowOfMonth(y, m)); // вместе с переводами
   const trSum = sumBase(txOfMonth(y, m, 'transfer'));
   const inSum = sumBase(txOfMonth(y, m, 'income'));
 
@@ -191,7 +199,7 @@ function renderOps() {
     <div class="card">
       <div class="sums-line">
         <span>Расходы<b>${fmtMoney(expSum, state.settings.baseCurrency)}</b></span>
-        <span>Переводы<b style="color:var(--accent)">${fmtMoney(trSum, state.settings.baseCurrency)}</b></span>
+        <span>из них переводы<b style="color:var(--accent)">${fmtMoney(trSum, state.settings.baseCurrency)}</b></span>
         <span>Доходы<b style="color:var(--green)">+${fmtMoney(inSum, state.settings.baseCurrency)}</b></span>
       </div>
     </div>
@@ -521,7 +529,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 9</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 11</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
