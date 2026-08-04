@@ -515,6 +515,20 @@ input[type="checkbox"]:checked::after {
 
 .divider { height: 1px; background: var(--border); margin: 14px 0; }
 
+.switch-list { display: flex; flex-direction: column; }
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  cursor: pointer;
+}
+.switch-row:last-child { border-bottom: none; }
+.switch-row input[type="checkbox"] { flex: 0 0 auto; }
+
 .diag {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;

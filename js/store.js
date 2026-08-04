@@ -25,6 +25,16 @@ function defaultState() {
       baseCurrency: 'UAH',   // 'UAH' | 'USD'
       manualRate: null,      // если задан — используется вместо курса из сети
       monoToken: '',
+      serverUrl: '',         // личный сервер уведомлений и автосинхронизации
+      deviceToken: '',
+      remindDays: 1,         // за сколько дней напоминать о платеже
+      remindHour: 10,        // в котором часу (по времени телефона)
+    },
+    sync: {
+      cursor: 0,             // до какой операции сервера уже забрали
+      lastAt: 0,
+      notify: null,          // зеркало настроек уведомлений с сервера
+      serverInfo: null,
     },
     rate: { usdUah: 42, updatedAt: 0, source: 'по умолчанию' },
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
@@ -50,6 +60,7 @@ function load() {
       settings: { ...base.settings, ...(data.settings || {}) },
       rate: { ...base.rate, ...(data.rate || {}) },
       mono: { ...base.mono, ...(data.mono || {}) },
+      sync: { ...base.sync, ...(data.sync || {}) },
       categories: mergeCategories(data.categories, base.categories),
       transactions: data.transactions || [],
       subscriptions: (data.subscriptions || []).map(normalizeSub),

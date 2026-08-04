@@ -1,0 +1,24 @@
+services:
+  tracker-notify:
+    build: .
+    image: tracker-notify:latest
+    container_name: tracker-notify
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # только localhost: наружу сервис выставляет уже работающий на сервере Caddy
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ./data:/data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true          # писать можно только в том с данными
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

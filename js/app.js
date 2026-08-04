@@ -493,6 +493,11 @@ function renderSettings() {
     </div>
 
     <div class="card">
+      <h3>Сервер и уведомления</h3>
+      ${renderServerBlock()}
+    </div>
+
+    <div class="card">
       <h3>Категории</h3>
       <div style="padding:0">
         ${state.categories.map((c) => `
@@ -524,6 +529,90 @@ function renderSettings() {
       <button class="btn secondary" data-action="tap-test" style="margin-top:10px">Тест тапа</button>
       <p class="hint">Если тап «промахивается», разница между координатами нажатия и клика покажет сдвиг.</p>
     </div>` : ''}
+  `;
+}
+
+/* Блок настройки личного сервера: автосинхронизация и push-уведомления */
+function renderServerBlock() {
+  const s = state.settings;
+  if (!serverConfigured()) {
+    return `
+      <div class="field">
+        <label>Адрес сервера</label>
+        <input id="srv-url" type="url" autocapitalize="off" autocorrect="off"
+               placeholder="https://tracker.example.com" value="${esc(s.serverUrl)}">
+      </div>
+      <div class="field">
+        <label>Токен устройства</label>
+        <input id="srv-token" type="text" autocomplete="off" autocapitalize="off"
+               placeholder="из .env сервера" value="${esc(s.deviceToken)}">
+      </div>
+      <button class="btn" data-action="srv-connect">Подключить</button>
+      <p class="hint">Сервер принимает вебхуки Monobank, чтобы операции подтягивались сами, и шлёт уведомления. Он видит только операции — токен Monobank остаётся на телефоне.</p>
+    `;
+  }
+
+  const n = state.sync.notify || {};
+  const info = state.sync.serverInfo || {};
+  const lastSync = state.sync.lastAt
+    ? new Date(state.sync.lastAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : 'ещё не было';
+  const pushOn = info.subscriptions > 0;
+
+  const toggle = (key, label, on) => `
+    <label class="switch-row">
+      <span>${label}</span>
+      <input type="checkbox" data-action="notify-toggle" data-key="${key}" ${on ? 'checked' : ''}>
+    </label>`;
+
+  return `
+    <div class="rate-line" style="margin-bottom:10px">
+      <div>
+        <div class="rate-value" style="font-size:15px">${esc(s.serverUrl.replace(/^https?:\/\//, ''))}</div>
+        <div class="rate-src">синхронизация: ${lastSync}${info.lastHookAt ? ' · вебхук активен' : ''}</div>
+      </div>
+      <button class="icon-btn" data-action="srv-sync" title="Синхронизировать">🔄</button>
+    </div>
+
+    <button class="btn secondary" data-action="mono-webhook">Включить автосинхронизацию Monobank</button>
+    <p class="hint" style="margin-bottom:12px">Нажмите один раз — Monobank начнёт присылать операции на сервер сразу после оплаты.</p>
+
+    <div class="divider"></div>
+
+    ${pushOn ? `
+      <div class="switch-list">
+        ${toggle('onExpense', 'Новые траты', n.onExpense)}
+        ${toggle('onIncome', 'Поступления', n.onIncome)}
+        ${toggle('onTransfer', 'Переводы и снятие наличных', n.onTransfer)}
+        ${toggle('reminders', 'Напоминания о платежах', n.reminders)}
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>Уведомлять только от суммы (0 — обо всех)</label>
+        <div class="field-split">
+          <input id="notify-min" type="text" inputmode="decimal" placeholder="0" value="${n.minAmount || ''}">
+          <button class="btn small secondary" data-action="notify-min-save" style="flex:0 0 auto">Сохранить</button>
+        </div>
+      </div>
+      <div class="field-split">
+        <div class="field">
+          <label>Напоминать за (дней)</label>
+          <input id="remind-days" type="text" inputmode="numeric" value="${s.remindDays}">
+        </div>
+        <div class="field">
+          <label>В котором часу</label>
+          <input id="remind-hour" type="text" inputmode="numeric" value="${s.remindHour}">
+        </div>
+      </div>
+      <button class="btn small secondary" data-action="remind-save">Сохранить расписание</button>
+      <button class="btn secondary" data-action="push-test" style="margin-top:10px">Отправить тестовое уведомление</button>
+      <button class="btn danger-ghost" data-action="push-disable">Отключить уведомления</button>
+    ` : `
+      <button class="btn" data-action="push-enable">Включить уведомления</button>
+      <p class="hint">iOS присылает уведомления только приложению, добавленному на экран «Домой». ${info.pushConfigured === false ? '<b>На сервере не заданы VAPID-ключи.</b>' : ''}</p>
+    `}
+
+    ${info.lastPushError ? `<p class="hint" style="color:var(--yellow)">Последняя ошибка отправки: ${esc(info.lastPushError)}</p>` : ''}
+    <button class="btn danger-ghost" data-action="srv-disconnect">Отключить сервер</button>
   `;
 }
 
@@ -1204,6 +1293,86 @@ async function handleMonoImport(btn) {
   }
 }
 
+/* ---------- личный сервер: подключение, синхронизация, уведомления ---------- */
+
+async function withBusy(btn, label, fn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  try {
+    await fn();
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+    render();
+  }
+}
+
+function handleServerConnect(btn) {
+  const url = document.getElementById('srv-url').value.trim();
+  const token = document.getElementById('srv-token').value.trim();
+  if (!url || !token) { toast('Заполните адрес и токен'); return; }
+  if (!/^https:\/\//i.test(url)) { toast('Адрес должен начинаться с https://'); return; }
+
+  const prev = { url: state.settings.serverUrl, token: state.settings.deviceToken };
+  state.settings.serverUrl = url;
+  state.settings.deviceToken = token;
+
+  withBusy(btn, 'Проверяем…', async () => {
+    try {
+      await syncAll();
+      save();
+      toast('Сервер подключён');
+    } catch (e) {
+      state.settings.serverUrl = prev.url;   // не сохраняем нерабочие данные
+      state.settings.deviceToken = prev.token;
+      throw e;
+    }
+  });
+}
+
+function handleServerSync(btn) {
+  withBusy(btn, '…', async () => {
+    const added = await syncAll();
+    toast(added ? `Новых операций: ${added}` : 'Новых операций нет');
+  });
+}
+
+function handleMonoWebhook(btn) {
+  if (!state.settings.monoToken) { toast('Сначала подключите Monobank выше'); return; }
+  const url = (state.sync.serverInfo && state.sync.serverInfo.webhookUrl);
+  if (!url) { toast('Сначала синхронизируйтесь с сервером'); return; }
+  withBusy(btn, 'Включаем…', async () => {
+    await monoSetWebhook(url);
+    toast('Готово: операции будут приходить автоматически');
+  });
+}
+
+function handlePushEnable(btn) {
+  withBusy(btn, 'Включаем…', async () => {
+    await enablePush();
+    await syncAll();
+    toast('Уведомления включены');
+  });
+}
+
+function handlePushDisable(btn) {
+  withBusy(btn, 'Отключаем…', async () => {
+    await disablePush();
+    await syncAll();
+    toast('Уведомления отключены');
+  });
+}
+
+function handlePushTest(btn) {
+  withBusy(btn, 'Отправляем…', async () => {
+    const r = await sendTestPush();
+    toast(r.sent ? 'Отправлено — проверьте экран блокировки' : ('Не отправлено: ' + (r.error || 'нет подписок')));
+  });
+}
+
 function exportData() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -1400,6 +1569,42 @@ document.addEventListener('click', (e) => {
       }
       break;
 
+    case 'srv-connect': handleServerConnect(el); break;
+    case 'srv-sync': handleServerSync(el); break;
+    case 'srv-disconnect':
+      if (confirm('Отключить сервер? Уже загруженные операции останутся.')) {
+        state.settings.serverUrl = '';
+        state.settings.deviceToken = '';
+        state.sync = { cursor: 0, lastAt: 0, notify: null, serverInfo: null };
+        save(); render();
+      }
+      break;
+    case 'mono-webhook': handleMonoWebhook(el); break;
+    case 'push-enable': handlePushEnable(el); break;
+    case 'push-disable': handlePushDisable(el); break;
+    case 'push-test': handlePushTest(el); break;
+    case 'notify-min-save': {
+      const v = parseFloat(String(document.getElementById('notify-min').value).replace(',', '.')) || 0;
+      if (v < 0) { toast('Сумма не может быть отрицательной'); return; }
+      saveNotifySettings({ minAmount: v })
+        .then(() => { render(); toast(v ? `Уведомления от ${fmtMoney(v, 'UAH')}` : 'Уведомления обо всех операциях'); })
+        .catch((e) => toast(e.message));
+      break;
+    }
+    case 'remind-save': {
+      const days = parseInt(document.getElementById('remind-days').value, 10);
+      const hour = parseInt(document.getElementById('remind-hour').value, 10);
+      if (!(days >= 0 && days <= 30)) { toast('Дней должно быть от 0 до 30'); return; }
+      if (!(hour >= 0 && hour <= 23)) { toast('Час должен быть от 0 до 23'); return; }
+      state.settings.remindDays = days;
+      state.settings.remindHour = hour;
+      save();
+      syncReminders()
+        .then((n) => { render(); toast(`Расписание обновлено: ${n} напоминаний`); })
+        .catch((e) => toast(e.message));
+      break;
+    }
+
     case 'diag-toggle': ui.showDiag = !ui.showDiag; render(); break;
     case 'tap-test': runTapTest(el); break;
 
@@ -1444,6 +1649,11 @@ document.addEventListener('change', (e) => {
     const plan = document.getElementById('sub-plan');
     if (plan) plan.hidden = !e.target.checked;
   }
+  const notifyToggle = e.target && e.target.closest('[data-action="notify-toggle"]');
+  if (notifyToggle) {
+    saveNotifySettings({ [notifyToggle.dataset.key]: notifyToggle.checked })
+      .catch((err) => { toast(err.message); render(); });
+  }
 });
 
 fabEl.addEventListener('click', () => {
@@ -1487,6 +1697,18 @@ render();
 refreshRate(false)
   .then((changed) => { if (changed) render(); })
   .catch(() => { /* останемся на сохранённом курсе */ });
+
+/* Тихая синхронизация при запуске и возврате в приложение */
+function backgroundSync() {
+  if (!serverConfigured()) return;
+  syncAll()
+    .then((added) => { if (added) render(); })
+    .catch(() => { /* нет сети — попробуем в следующий раз */ });
+}
+backgroundSync();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) backgroundSync();
+});
 
 if ('serviceWorker' in navigator &&
     (location.protocol === 'https:' || location.hostname === 'localhost')) {

@@ -37,12 +37,18 @@ async function refreshRate(force) {
 
 const CURRENCY_BY_CODE = { 980: 'UAH', 840: 'USD' };
 
-async function monoFetch(path) {
+async function monoFetch(path, body) {
   const token = state.settings.monoToken;
   if (!token) throw new Error('Токен Monobank не задан');
   let res;
   try {
-    res = await fetch('https://api.monobank.ua' + path, { headers: { 'X-Token': token } });
+    res = await fetch('https://api.monobank.ua' + path, body
+      ? {
+        method: 'POST',
+        headers: { 'X-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+      : { headers: { 'X-Token': token } });
   } catch (e) {
     throw new Error('Не удалось связаться с Monobank. Проверьте интернет и попробуйте ещё раз.');
   }
@@ -99,6 +105,34 @@ function categoryForMcc(mcc) {
   return FALLBACK_CATEGORY;
 }
 
+/* Операция Monobank → операция трекера. Одна и та же логика нужна и при
+   ручном импорте выписки, и при автосинхронизации через вебхук. */
+function mapMonoItem(item, currency) {
+  const isIncome = item.amount > 0;
+  const isTransfer = !isIncome && TRANSFER_MCC.includes(item.mcc);
+  const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
+  const when = new Date((item.time || Math.floor(Date.now() / 1000)) * 1000);
+  return {
+    id: uid(),
+    ts: when.getTime(),
+    type,
+    amount: Math.abs(item.amount) / 100,
+    currency,
+    categoryId: type === 'transfer' ? null : (isIncome ? FALLBACK_CATEGORY : categoryForMcc(item.mcc)),
+    description: (item.description || '').replace(/\n/g, ' · '),
+    date: toISO(when),
+    source: 'mono',
+    sourceId: item.id,
+  };
+}
+
+/* Регистрирует адрес вебхука в Monobank. Запрос уходит с телефона —
+   токен остаётся на устройстве и на сервер не попадает. */
+async function monoSetWebhook(url) {
+  await monoFetch('/personal/webhook', { webHookUrl: url });
+  return true;
+}
+
 /**
  * Импорт выписки за период [fromSec, toSec] (unix-секунды).
  * Monobank отдаёт максимум 31 день + 1 час за один запрос.
@@ -120,24 +154,11 @@ async function monoImport(accountId, fromSec, toSec) {
   for (const it of items) {
     if (!it.amount) continue;
     if (known.has(it.id) || deleted.has(it.id)) { duplicates++; continue; }
-    const isIncome = it.amount > 0;
-    const isTransfer = !isIncome && TRANSFER_MCC.includes(it.mcc);
-    const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
-    addedDates.push(toISO(new Date(it.time * 1000)));
-    state.transactions.push({
-      id: uid(),
-      ts: (it.time || 0) * 1000,
-      type,
-      amount: Math.abs(it.amount) / 100,
-      currency: account.currency,
-      categoryId: type === 'transfer' ? null : (isIncome ? FALLBACK_CATEGORY : categoryForMcc(it.mcc)),
-      description: (it.description || '').replace(/\n/g, ' · '),
-      date: toISO(new Date(it.time * 1000)),
-      source: 'mono',
-      sourceId: it.id,
-    });
+    const tx = mapMonoItem(it, account.currency);
+    addedDates.push(tx.date);
+    state.transactions.push(tx);
     added++;
-    if (isIncome) incomes++;
+    if (tx.type === 'income') incomes++;
   }
 
   if (added) save();
