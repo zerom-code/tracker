@@ -9,7 +9,9 @@ services:
       # только localhost: наружу сервис выставляет уже работающий на сервере Caddy
       - "127.0.0.1:8090:8090"
     volumes:
-      - ./data:/data
+      # именованный том, а не ./data: bind-mount создаётся на хосте от root,
+      # и контейнер, работающий от пользователя node, не может в него писать
+      - tracker-data:/data
     security_opt:
       - no-new-privileges:true
     read_only: true          # писать можно только в том с данными
@@ -22,3 +24,6 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+
+volumes:
+  tracker-data:

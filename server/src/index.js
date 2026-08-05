@@ -3,6 +3,8 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { config, webhookPath, webhookUrl } from './config.js';
 import { Store } from './store.js';
 import { buildOpNotification, shouldNotify } from './notify.js';
@@ -229,14 +231,34 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   route(req, res, url, origin).catch((e) => {
     console.error('[error]', req.method, url.pathname, e.message);
-    if (!res.headersSent) json(res, 500, { error: 'внутренняя ошибка' }, origin);
+    // сервис личный и за токеном — показываем причину, иначе такую ошибку
+    // не отладить, глядя только на телефон
+    if (!res.headersSent) json(res, 500, { error: e.message }, origin);
   });
 });
+
+/* Каталог данных проверяем на запись сразу: иначе первая же запись падает
+   с невнятной 500 уже после того, как чтение отработало нормально. */
+function checkDataWritable() {
+  try {
+    const probe = path.join(config.dataDir, '.write-test');
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (e) {
+    console.error(`[start] ВНИМАНИЕ: в ${config.dataDir} нельзя писать (${e.code || e.message}).`);
+    console.error('[start] Чтение будет работать, но настройки и напоминания не сохранятся.');
+    console.error('[start] Обычно это права на каталог: используйте именованный том');
+    console.error('[start] (см. docker-compose.yml) или выполните на хосте: chown -R 1000:1000 <каталог>');
+    return false;
+  }
+}
 
 server.listen(config.port, config.host, () => {
   console.log(`[start] трекер-сервис слушает ${config.host}:${config.port}`);
   console.log(`[start] адрес вебхука: ${webhookUrl}`);
   console.log(`[start] push ${pushConfigured() ? 'настроен' : 'НЕ настроен (нет VAPID-ключей)'}`);
+  console.log(`[start] каталог данных ${config.dataDir}: ${checkDataWritable() ? 'доступен для записи' : 'ТОЛЬКО ЧТЕНИЕ'}`);
 });
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
