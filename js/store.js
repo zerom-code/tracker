@@ -35,6 +35,7 @@ function defaultState() {
       lastAt: 0,
       notify: null,          // зеркало настроек уведомлений с сервера
       serverInfo: null,
+      webhookAt: 0,          // когда включили автосинхронизацию Monobank
     },
     rate: { usdUah: 42, updatedAt: 0, source: 'по умолчанию' },
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),

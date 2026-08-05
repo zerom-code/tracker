@@ -531,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 12</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 13</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -564,10 +564,11 @@ function renderServerBlock() {
 
   const n = state.sync.notify || {};
   const info = state.sync.serverInfo || {};
-  const lastSync = state.sync.lastAt
-    ? new Date(state.sync.lastAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-    : 'ещё не было';
+  const fmtTime = (ts) => new Date(ts).toLocaleString('ru-RU',
+    { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const lastSync = state.sync.lastAt ? fmtTime(state.sync.lastAt) : 'ещё не было';
   const pushOn = info.subscriptions > 0;
+  const hookOn = Boolean(state.sync.webhookAt);
 
   const toggle = (key, label, on) => `
     <label class="switch-row">
@@ -579,49 +580,66 @@ function renderServerBlock() {
     <div class="rate-line" style="margin-bottom:10px">
       <div>
         <div class="rate-value" style="font-size:15px">${esc(s.serverUrl.replace(/^https?:\/\//, ''))}</div>
-        <div class="rate-src">синхронизация: ${lastSync}${info.lastHookAt ? ' · вебхук активен' : ''}</div>
+        <div class="rate-src">синхронизация: ${lastSync}</div>
       </div>
       <button class="icon-btn" data-action="srv-sync" title="Синхронизировать">🔄</button>
     </div>
 
-    <button class="btn secondary" data-action="mono-webhook">Включить автосинхронизацию Monobank</button>
-    <p class="hint" style="margin-bottom:12px">Нажмите один раз — Monobank начнёт присылать операции на сервер сразу после оплаты.</p>
+    ${hookOn ? `
+      <div class="status-row ok">
+        <span>✓ Автосинхронизация Monobank включена</span>
+        <button class="btn small secondary" data-action="mono-webhook-off">Отключить</button>
+      </div>
+      <p class="hint" style="margin-bottom:12px">${info.lastHookAt
+        ? 'Последняя операция от банка: ' + fmtTime(info.lastHookAt)
+        : 'Ждём первую операцию — она придёт сразу после ближайшей оплаты картой.'}</p>
+    ` : `
+      <button class="btn secondary" data-action="mono-webhook">Включить автосинхронизацию Monobank</button>
+      <p class="hint" style="margin-bottom:12px">Нажмите один раз — Monobank начнёт присылать операции на сервер сразу после оплаты.</p>
+    `}
 
     <div class="divider"></div>
 
+    <h3 style="margin-bottom:10px">Уведомления</h3>
     ${pushOn ? `
-      <div class="switch-list">
-        ${toggle('onExpense', 'Новые траты', n.onExpense)}
-        ${toggle('onIncome', 'Поступления', n.onIncome)}
-        ${toggle('onTransfer', 'Переводы и снятие наличных', n.onTransfer)}
-        ${toggle('reminders', 'Напоминания о платежах', n.reminders)}
+      <div class="status-row ok">
+        <span>✓ Уведомления включены</span>
+        <button class="btn small secondary" data-action="push-test">Проверить</button>
       </div>
-      <div class="field" style="margin-top:12px">
-        <label>Уведомлять только от суммы (0 — обо всех)</label>
-        <div class="field-split">
-          <input id="notify-min" type="text" inputmode="decimal" placeholder="0" value="${n.minAmount || ''}">
-          <button class="btn small secondary" data-action="notify-min-save" style="flex:0 0 auto">Сохранить</button>
-        </div>
-      </div>
-      <div class="field-split">
-        <div class="field">
-          <label>Напоминать за (дней)</label>
-          <input id="remind-days" type="text" inputmode="numeric" value="${s.remindDays}">
-        </div>
-        <div class="field">
-          <label>В котором часу</label>
-          <input id="remind-hour" type="text" inputmode="numeric" value="${s.remindHour}">
-        </div>
-      </div>
-      <button class="btn small secondary" data-action="remind-save">Сохранить расписание</button>
-      <button class="btn secondary" data-action="push-test" style="margin-top:10px">Отправить тестовое уведомление</button>
-      <button class="btn danger-ghost" data-action="push-disable">Отключить уведомления</button>
     ` : `
-      <button class="btn" data-action="push-enable">Включить уведомления</button>
-      <p class="hint">iOS присылает уведомления только приложению, добавленному на экран «Домой». ${info.pushConfigured === false ? '<b>На сервере не заданы VAPID-ключи.</b>' : ''}</p>
+      <button class="btn" data-action="push-enable">Включить уведомления на этом айфоне</button>
+      <p class="hint">Работает только в приложении, добавленном на экран «Домой». ${info.pushConfigured === false ? '<b>На сервере не заданы VAPID-ключи.</b>' : ''}</p>
     `}
 
+    <div class="switch-list" style="margin-top:12px">
+      ${toggle('onExpense', 'Новые траты', n.onExpense)}
+      ${toggle('onIncome', 'Поступления', n.onIncome)}
+      ${toggle('onTransfer', 'Переводы и снятие наличных', n.onTransfer)}
+      ${toggle('reminders', 'Напоминания о подписках и рассрочках', n.reminders)}
+    </div>
+
+    <div class="field" style="margin-top:12px">
+      <label>Уведомлять только от суммы (0 — обо всех)</label>
+      <div class="field-split">
+        <input id="notify-min" type="text" inputmode="decimal" placeholder="0" value="${n.minAmount || ''}">
+        <button class="btn small secondary" data-action="notify-min-save" style="flex:0 0 auto">Сохранить</button>
+      </div>
+    </div>
+    <div class="field-split">
+      <div class="field">
+        <label>Напоминать за (дней)</label>
+        <input id="remind-days" type="text" inputmode="numeric" value="${s.remindDays}">
+      </div>
+      <div class="field">
+        <label>В котором часу</label>
+        <input id="remind-hour" type="text" inputmode="numeric" value="${s.remindHour}">
+      </div>
+    </div>
+    <button class="btn small secondary" data-action="remind-save">Сохранить расписание</button>
+    ${pushOn ? '<button class="btn danger-ghost" data-action="push-disable">Отключить уведомления</button>' : ''}
+
     ${info.lastPushError ? `<p class="hint" style="color:var(--yellow)">Последняя ошибка отправки: ${esc(info.lastPushError)}</p>` : ''}
+    <div class="divider"></div>
     <button class="btn danger-ghost" data-action="srv-disconnect">Отключить сервер</button>
   `;
 }
@@ -1362,7 +1380,19 @@ function handleMonoWebhook(btn) {
   if (!url) { toast('Сначала синхронизируйтесь с сервером'); return; }
   withBusy(btn, 'Включаем…', async () => {
     await monoSetWebhook(url);
+    state.sync.webhookAt = Date.now();
+    save();
     toast('Готово: операции будут приходить автоматически');
+  });
+}
+
+function handleMonoWebhookOff(btn) {
+  if (!confirm('Отключить автосинхронизацию? Операции можно будет загружать вручную через импорт.')) return;
+  withBusy(btn, 'Отключаем…', async () => {
+    await monoSetWebhook(''); // пустой адрес отменяет вебхук на стороне банка
+    state.sync.webhookAt = 0;
+    save();
+    toast('Автосинхронизация отключена');
   });
 }
 
@@ -1596,6 +1626,7 @@ document.addEventListener('click', (e) => {
       }
       break;
     case 'mono-webhook': handleMonoWebhook(el); break;
+    case 'mono-webhook-off': handleMonoWebhookOff(el); break;
     case 'push-enable': handlePushEnable(el); break;
     case 'push-disable': handlePushDisable(el); break;
     case 'push-test': handlePushTest(el); break;
