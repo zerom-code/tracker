@@ -6,6 +6,19 @@ function serverConfigured() {
   return Boolean(state.settings.serverUrl && state.settings.deviceToken);
 }
 
+/* Браузер сообщает об отказе CORS так же, как о недоступности сети, —
+   обычным сбоем fetch. Отличаем одно от другого запросом в режиме no-cors:
+   он не требует разрешения сервера, поэтому проходит, если сервер вообще
+   отвечает. Значит, сбой основного запроса — именно из-за CORS. */
+async function probeServerReachable(baseUrl) {
+  try {
+    await fetch(baseUrl.replace(/\/+$/, '') + '/health', { mode: 'no-cors', cache: 'no-store' });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function serverFetch(path, options = {}) {
   if (!serverConfigured()) throw new Error('Сервер не настроен');
   const base = state.settings.serverUrl.replace(/\/+$/, '');

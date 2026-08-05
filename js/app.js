@@ -32,7 +32,9 @@ function toast(msg) {
   toastEl.textContent = msg;
   toastEl.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 2800);
+  // длинные подсказки держим на экране дольше, чтобы успеть прочитать
+  toastTimer = setTimeout(() => { toastEl.hidden = true; },
+    Math.min(9000, 2800 + msg.length * 45));
 }
 
 function moneyBoth(amountBase) {
@@ -529,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 11</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 12</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1325,7 +1327,7 @@ function handleServerConnect(btn) {
   if (!/^https:\/\//i.test(url)) { toast('Адрес должен начинаться с https://'); return; }
 
   const prev = { url: state.settings.serverUrl, token: state.settings.deviceToken };
-  state.settings.serverUrl = url;
+  state.settings.serverUrl = url.replace(/\/+$/, '');
   state.settings.deviceToken = token;
 
   withBusy(btn, 'Проверяем…', async () => {
@@ -1336,6 +1338,12 @@ function handleServerConnect(btn) {
     } catch (e) {
       state.settings.serverUrl = prev.url;   // не сохраняем нерабочие данные
       state.settings.deviceToken = prev.token;
+      save();
+      // сервер отвечает, но запрос не прошёл — значит дело в CORS
+      if (/недоступен/.test(e.message) && await probeServerReachable(url)) {
+        throw new Error('Сервер отвечает, но не разрешает запросы с адреса ' +
+          location.origin + '. Впишите его в ALLOWED_ORIGINS в .env и перезапустите контейнер.');
+      }
       throw e;
     }
   });
