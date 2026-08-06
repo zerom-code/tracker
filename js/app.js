@@ -531,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 17</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 18</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1773,16 +1773,25 @@ refreshRate(false)
 /* Синхронизация при запуске, при возврате в приложение и раз в минуту,
    пока приложение открыто. Ошибку запоминаем: молча падающая синхронизация
    выглядит так, будто её вовсе нет. */
+let syncFailures = 0;
+
 function backgroundSync() {
   if (!serverConfigured()) return;
+  // если сервер лежит, отступаем: 2, 4, 8, 15 минут — иначе разряжаем батарею
+  if (syncFailures > 0) {
+    const wait = Math.min(15, 2 ** syncFailures) * 60_000;
+    if (Date.now() - (state.sync.lastErrorAt || 0) < wait) return;
+  }
   syncAll()
     .then((added) => {
       const hadError = Boolean(state.sync.lastError);
+      syncFailures = 0;
       state.sync.lastError = '';
       save();
       if (added || hadError) render();
     })
     .catch((e) => {
+      syncFailures++;
       state.sync.lastError = e.message;
       state.sync.lastErrorAt = Date.now();
       save();
