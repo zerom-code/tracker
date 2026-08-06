@@ -531,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 13</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 14</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -568,7 +568,10 @@ function renderServerBlock() {
     { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const lastSync = state.sync.lastAt ? fmtTime(state.sync.lastAt) : 'ещё не было';
   const pushOn = info.subscriptions > 0;
-  const hookOn = Boolean(state.sync.webhookAt);
+  // банк уже что-то присылал — значит вебхук точно зарегистрирован,
+  // даже если включали его до появления этой отметки
+  const hookOn = Boolean(state.sync.webhookAt || info.lastHookAt);
+  const err = state.sync.lastError;
 
   const toggle = (key, label, on) => `
     <label class="switch-row">
@@ -584,6 +587,13 @@ function renderServerBlock() {
       </div>
       <button class="icon-btn" data-action="srv-sync" title="Синхронизировать">🔄</button>
     </div>
+
+    ${err ? `
+    <div class="status-row bad" style="margin-bottom:10px">
+      <span>Синхронизация не проходит: ${esc(err)}</span>
+    </div>
+    ${/токен/i.test(err) ? '<p class="hint">Похоже, токен на сервере изменился — отключите сервер ниже и подключите заново с новым токеном.</p>' : ''}
+    ` : ''}
 
     ${hookOn ? `
       <div class="status-row ok">
@@ -1745,17 +1755,30 @@ refreshRate(false)
   .then((changed) => { if (changed) render(); })
   .catch(() => { /* останемся на сохранённом курсе */ });
 
-/* Тихая синхронизация при запуске и возврате в приложение */
+/* Синхронизация при запуске, при возврате в приложение и раз в минуту,
+   пока приложение открыто. Ошибку запоминаем: молча падающая синхронизация
+   выглядит так, будто её вовсе нет. */
 function backgroundSync() {
   if (!serverConfigured()) return;
   syncAll()
-    .then((added) => { if (added) render(); })
-    .catch(() => { /* нет сети — попробуем в следующий раз */ });
+    .then((added) => {
+      const hadError = Boolean(state.sync.lastError);
+      state.sync.lastError = '';
+      save();
+      if (added || hadError) render();
+    })
+    .catch((e) => {
+      state.sync.lastError = e.message;
+      state.sync.lastErrorAt = Date.now();
+      save();
+      if (ui.screen === 'settings') render();
+    });
 }
 backgroundSync();
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) backgroundSync();
 });
+setInterval(() => { if (!document.hidden) backgroundSync(); }, 60_000);
 
 if ('serviceWorker' in navigator &&
     (location.protocol === 'https:' || location.hostname === 'localhost')) {

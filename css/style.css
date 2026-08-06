@@ -528,6 +528,13 @@ input[type="checkbox"]:checked::after {
   font-weight: 600;
 }
 .status-row.ok { color: var(--green); border-color: rgba(62, 207, 142, 0.35); }
+.status-row.bad {
+  color: var(--red);
+  border-color: rgba(255, 107, 107, 0.35);
+  font-weight: 500;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
 .status-row .btn.small { font-weight: 600; }
 
 .switch-list { display: flex; flex-direction: column; }
