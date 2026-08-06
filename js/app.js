@@ -531,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 15</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 16</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -589,9 +589,10 @@ function renderServerBlock() {
     </div>
 
     ${err ? `
-    <div class="status-row bad" style="margin-bottom:10px">
+    <div class="status-row bad" style="margin-bottom:8px">
       <span>Синхронизация не проходит: ${esc(err)}</span>
     </div>
+    <button class="btn small secondary" data-action="srv-diagnose" style="margin-bottom:10px">Проверить связь</button>
     ${/токен/i.test(err) ? '<p class="hint">Похоже, токен на сервере изменился — отключите сервер ниже и подключите заново с новым токеном.</p>' : ''}
     ` : ''}
 
@@ -658,6 +659,7 @@ function diagLines() {
   const vv = window.visualViewport;
   const cs = getComputedStyle(document.documentElement);
   return [
+    'адрес приложения: ' + location.origin,
     'innerHeight: ' + window.innerHeight,
     'screen.height: ' + screen.height,
     'visualViewport: ' + (vv ? Math.round(vv.height) + ' (offsetTop ' + Math.round(vv.offsetTop) + ')' : 'нет'),
@@ -1338,7 +1340,12 @@ async function withBusy(btn, label, fn) {
   btn.disabled = true;
   btn.textContent = label;
   try {
-    await fn();
+    // страховка: что бы ни случилось, кнопка не останется в «…» навсегда
+    await Promise.race([
+      fn(),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('Операция не завершилась за 25 секунд')), 25000)),
+    ]);
   } catch (e) {
     toast(e.message);
   } finally {
@@ -1630,6 +1637,11 @@ document.addEventListener('click', (e) => {
 
     case 'srv-connect': handleServerConnect(el); break;
     case 'srv-sync': handleServerSync(el); break;
+    case 'srv-diagnose':
+      withBusy(el, 'Проверяем…', async () => {
+        alert(await diagnoseServer());
+      });
+      break;
     case 'srv-disconnect':
       if (confirm('Отключить сервер? Уже загруженные операции останутся.')) {
         state.settings.serverUrl = '';

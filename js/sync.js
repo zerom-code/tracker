@@ -175,6 +175,40 @@ async function saveNotifySettings(patch) {
   return data.settings;
 }
 
+/* Пошаговая проверка связи: отвечает ли сервер вообще, пускает ли он
+   запросы с адреса приложения и принимает ли токен. Возвращает текст,
+   по которому сразу видно, что чинить. */
+async function diagnoseServer() {
+  const base = (state.settings.serverUrl || '').replace(/\/+$/, '');
+  const out = ['Адрес приложения:', location.origin, '', 'Сервер:', base || '(не задан)', ''];
+  if (!base) return out.join('\n') + 'Сервер не настроен.';
+
+  const reachable = await probeServerReachable(base);
+  out.push(reachable ? '✓ Сервер отвечает' : '✗ Сервер не отвечает');
+  if (!reachable) {
+    out.push('', 'Откройте ' + base + '/health в Safari.',
+      'Если и там ошибка — дело в домене, сертификате или контейнере.');
+    return out.join('\n');
+  }
+
+  try {
+    const info = await serverFetch('/api/state');
+    out.push('✓ Доступ из приложения есть', '✓ Токен принят');
+    out.push('', 'Операций на сервере: ' + info.cursor,
+      'Подписок на уведомления: ' + info.subscriptions);
+  } catch (e) {
+    out.push('✗ ' + e.message);
+    if (/недоступен/.test(e.message)) {
+      out.push('', 'Сервер отвечает, но не разрешает запросы с адреса приложения.',
+        'Впишите в ALLOWED_ORIGINS на сервере:', location.origin,
+        'и перезапустите контейнер.');
+    } else if (/токен/i.test(e.message)) {
+      out.push('', 'Введите заново токен из .env сервера.');
+    }
+  }
+  return out.join('\n');
+}
+
 /* Полная синхронизация при открытии приложения: забрать операции,
    обновить расписание напоминаний, освежить состояние сервера. */
 async function syncAll() {
