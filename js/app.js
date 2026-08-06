@@ -531,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 16</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 17</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1344,7 +1344,7 @@ async function withBusy(btn, label, fn) {
     await Promise.race([
       fn(),
       new Promise((_, reject) => setTimeout(
-        () => reject(new Error('Операция не завершилась за 25 секунд')), 25000)),
+        () => reject(new Error('Операция не завершилась за 45 секунд')), 45000)),
     ]);
   } catch (e) {
     toast(e.message);
@@ -1375,7 +1375,7 @@ function handleServerConnect(btn) {
       state.settings.deviceToken = prev.token;
       save();
       // сервер отвечает, но запрос не прошёл — значит дело в CORS
-      if (/недоступен/.test(e.message) && await probeServerReachable(url)) {
+      if (/недоступен/.test(e.message) && await probeServerReachable(url) === true) {
         throw new Error('Сервер отвечает, но не разрешает запросы с адреса ' +
           location.origin + '. Впишите его в ALLOWED_ORIGINS в .env и перезапустите контейнер.');
       }

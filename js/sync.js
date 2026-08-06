@@ -12,10 +12,14 @@ function serverConfigured() {
    отвечает. Значит, сбой основного запроса — именно из-за CORS. */
 async function probeServerReachable(baseUrl) {
   try {
-    await fetch(baseUrl.replace(/\/+$/, '') + '/health', { mode: 'no-cors', cache: 'no-store' });
+    await fetch(baseUrl.replace(/\/+$/, '') + '/health', {
+      mode: 'no-cors', cache: 'no-store', signal: requestTimeout(8000),
+    });
     return true;
   } catch (e) {
-    return false;
+    // TimeoutError означает, что соединение принято, но ответа нет —
+    // это не то же самое, что «хост недоступен», и лечится по-другому
+    return e && e.name === 'TimeoutError' ? 'timeout' : false;
   }
 }
 
@@ -184,6 +188,13 @@ async function diagnoseServer() {
   if (!base) return out.join('\n') + 'Сервер не настроен.';
 
   const reachable = await probeServerReachable(base);
+  if (reachable === 'timeout') {
+    out.push('✗ Соединение установлено, но ответа нет (8 секунд тишины)');
+    out.push('', 'Домен отвечает, но запрос не доходит до сервиса.',
+      'Проверьте на VPS:', 'docker compose ps', 'curl -m 5 ' + base + '/health',
+      '', 'И откройте ' + base + '/health в Safari на телефоне.');
+    return out.join('\n');
+  }
   out.push(reachable ? '✓ Сервер отвечает' : '✗ Сервер не отвечает');
   if (!reachable) {
     out.push('', 'Откройте ' + base + '/health в Safari.',
