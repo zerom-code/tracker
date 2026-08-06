@@ -10,9 +10,8 @@
 
 ## Развёртывание
 
-Ниже команды под конфигурацию, где Caddy уже работает в systemd и занимает 80/443
-(как на сервере с `oblik-bot`). Сервис займёт свободный порт 8090 на localhost —
-существующие проекты не затрагиваются.
+Ниже команды под конфигурацию, где Caddy уже работает в systemd и занимает 80/443.
+Сервис займёт свободный порт 8090 на localhost — существующие проекты не затрагиваются.
 
 ### 1. Забрать код на сервер
 
@@ -41,7 +40,7 @@ nano .env
 ```
 
 ```ini
-PUBLIC_URL=https://tracker.5-75-224-2.sslip.io
+PUBLIC_URL=https://tracker.YOUR_IP.sslip.io
 DEVICE_TOKEN=<из шага 2>
 WEBHOOK_SECRET=<из шага 2>
 VAPID_PUBLIC=<из шага 2>
@@ -71,12 +70,12 @@ curl -s http://127.0.0.1:8090/health   # {"ok":true}
 
 ### 5. Добавить домен в Caddy
 
-Поддомены `sslip.io` резолвятся автоматически, DNS настраивать не нужно —
-`tracker.5-75-224-2.sslip.io` уже указывает на 5.75.224.2. Допишите в
+Если вы используете `sslip.io`, поддомены резолвятся автоматически, DNS настраивать не нужно —
+`tracker.YOUR_IP.sslip.io` указывает на ваш IP (`YOUR_IP`). Допишите в
 `/etc/caddy/Caddyfile` **отдельным блоком**, не трогая существующие:
 
 ```caddyfile
-tracker.5-75-224-2.sslip.io {
+tracker.YOUR_IP.sslip.io {
     reverse_proxy 127.0.0.1:8090
 }
 ```
@@ -84,7 +83,7 @@ tracker.5-75-224-2.sslip.io {
 ```bash
 sudo caddy validate --config /etc/caddy/Caddyfile   # проверить синтаксис
 sudo systemctl reload caddy                          # без простоя других сайтов
-curl -s https://tracker.5-75-224-2.sslip.io/health    # {"ok":true}
+curl -s https://tracker.YOUR_IP.sslip.io/health      # {"ok":true}
 ```
 
 Сертификат Caddy выпустит сам при первом обращении.
@@ -93,7 +92,7 @@ curl -s https://tracker.5-75-224-2.sslip.io/health    # {"ok":true}
 
 На айфоне, в трекере: **Ещё → Сервер и уведомления**
 
-1. Адрес сервера: `https://tracker.5-75-224-2.sslip.io`, токен устройства:
+1. Адрес сервера: `https://tracker.YOUR_IP.sslip.io`, токен устройства:
    `DEVICE_TOKEN` из `.env` → **Подключить**.
 2. **Включить автосинхронизацию Monobank** — приложение зарегистрирует адрес
    вебхука в банке (нужен уже подключённый Monobank в блоке выше).
@@ -123,7 +122,7 @@ docker compose exec tracker-notify cat /data/data.json > tracker-server-backup.j
 
 ```bash
 docker compose logs --tail 50          # приём вебхуков и отправка пушей
-curl -s -H "X-Device-Token: <токен>" https://tracker.5-75-224-2.sslip.io/api/state | jq
+curl -s -H "X-Device-Token: <токен>" https://tracker.YOUR_IP.sslip.io/api/state | jq
 ```
 
 В ответе `/api/state` видно: адрес вебхука, число подписок на уведомления,
@@ -132,7 +131,7 @@ curl -s -H "X-Device-Token: <токен>" https://tracker.5-75-224-2.sslip.io/ap
 Проверить, что банк достучится до вебхука:
 
 ```bash
-curl -i https://tracker.5-75-224-2.sslip.io/hook/<WEBHOOK_SECRET>   # 200 ok
+curl -i https://tracker.YOUR_IP.sslip.io/hook/<WEBHOOK_SECRET>   # 200 ok
 ```
 
 **Ошибка 500 в приложении, а `/health` отвечает.** Значит чтение работает,

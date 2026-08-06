@@ -1,0 +1,17 @@
+# Переменные окружения и секреты
+.env
+*.env.local
+
+# Зависимости Node
+node_modules/
+
+# Данные сервера
+server/data/
+data/
+
+# Файлы операционной системы и IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

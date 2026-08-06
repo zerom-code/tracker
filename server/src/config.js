@@ -17,7 +17,7 @@ export const config = {
   deviceToken: required('DEVICE_TOKEN'),
   // случайный сегмент пути вебхука: /hook/<secret>
   webhookSecret: required('WEBHOOK_SECRET'),
-  // публичный адрес сервиса, напр. https://tracker.5-75-224-2.sslip.io
+  // публичный адрес сервиса, напр. https://tracker.your-domain.com
   publicUrl: required('PUBLIC_URL').replace(/\/+$/, ''),
 
   // ключи Web Push (сгенерировать: npm run vapid)

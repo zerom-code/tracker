@@ -12,7 +12,7 @@
     "start": "node src/index.js",
     "vapid": "node src/vapid.js",
     "secrets": "node src/vapid.js --secrets",
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "web-push": "^3.6.7"
