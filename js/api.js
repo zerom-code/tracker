@@ -37,6 +37,12 @@ async function refreshRate(force) {
 
 const CURRENCY_BY_CODE = { 980: 'UAH', 840: 'USD' };
 
+/* Запрос без таймаута может висеть бесконечно, и кнопка остаётся в «…» */
+function requestTimeout(ms = 15000) {
+  return (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+    ? AbortSignal.timeout(ms) : undefined;
+}
+
 async function monoFetch(path, body) {
   const token = state.settings.monoToken;
   if (!token) throw new Error('Токен Monobank не задан');
@@ -47,9 +53,11 @@ async function monoFetch(path, body) {
         method: 'POST',
         headers: { 'X-Token': token, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: requestTimeout(),
       }
-      : { headers: { 'X-Token': token } });
+      : { headers: { 'X-Token': token }, signal: requestTimeout() });
   } catch (e) {
+    if (e && e.name === 'TimeoutError') throw new Error('Monobank не ответил за 15 секунд, попробуйте ещё раз');
     throw new Error('Не удалось связаться с Monobank. Проверьте интернет и попробуйте ещё раз.');
   }
   if (res.status === 429) throw new Error('Monobank ограничивает частоту запросов: подождите минуту и повторите.');
@@ -129,7 +137,16 @@ function mapMonoItem(item, currency) {
 /* Регистрирует адрес вебхука в Monobank. Запрос уходит с телефона —
    токен остаётся на устройстве и на сервер не попадает. */
 async function monoSetWebhook(url) {
-  await monoFetch('/personal/webhook', { webHookUrl: url });
+  try {
+    await monoFetch('/personal/webhook', { webHookUrl: url });
+  } catch (e) {
+    // банк проверяет адрес запросом и, не получив 200, отвечает 400
+    if (url && /HTTP 400/.test(e.message)) {
+      throw new Error('Monobank не принял адрес: банк должен получить ответ 200 по ' +
+        url + ' — проверьте, что сервер доступен извне и адрес актуален.');
+    }
+    throw e;
+  }
   return true;
 }
 

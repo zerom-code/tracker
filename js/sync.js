@@ -31,8 +31,10 @@ async function serverFetch(path, options = {}) {
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: requestTimeout(),
     });
   } catch (e) {
+    if (e && e.name === 'TimeoutError') throw new Error('Сервер не ответил за 15 секунд');
     throw new Error('Сервер недоступен. Проверьте адрес и интернет.');
   }
   if (res.status === 401) throw new Error('Сервер не принял токен устройства');

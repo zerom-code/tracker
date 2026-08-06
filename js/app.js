@@ -531,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 14</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 15</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1386,9 +1386,12 @@ function handleServerSync(btn) {
 
 function handleMonoWebhook(btn) {
   if (!state.settings.monoToken) { toast('Сначала подключите Monobank выше'); return; }
-  const url = (state.sync.serverInfo && state.sync.serverInfo.webhookUrl);
-  if (!url) { toast('Сначала синхронизируйтесь с сервером'); return; }
   withBusy(btn, 'Включаем…', async () => {
+    // адрес спрашиваем у сервера прямо сейчас: сохранённый мог устареть,
+    // если на сервере меняли WEBHOOK_SECRET
+    const info = await serverFetch('/api/state');
+    const url = info.webhookUrl;
+    if (!url) throw new Error('Сервер не сообщил адрес вебхука');
     await monoSetWebhook(url);
     state.sync.webhookAt = Date.now();
     save();
