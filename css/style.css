@@ -374,7 +374,8 @@ input[type="checkbox"]:checked::after {
   left: 0;
   right: 0;
   height: 100%;
-  height: var(--app-h, 100%);
+  /* поднятая клавиатура уменьшает доступную высоту, иначе лист уходит под неё */
+  height: calc(var(--app-h, 100%) - var(--kb-h, 0px));
   background: rgba(0, 0, 0, 0.55);
   z-index: 50;
   display: flex;
@@ -388,7 +389,7 @@ input[type="checkbox"]:checked::after {
   width: 100%;
   max-width: 560px;
   max-height: 88vh;
-  max-height: calc(var(--app-h, 100vh) * 0.88);
+  max-height: calc((var(--app-h, 100vh) - var(--kb-h, 0px)) * 0.92);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding: 10px 18px calc(22px + env(safe-area-inset-bottom));

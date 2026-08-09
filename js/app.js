@@ -531,7 +531,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 18</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 19</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1740,24 +1740,49 @@ fabEl.addEventListener('click', () => {
 // но innerHeight и visualViewport занижены на высоту статус-бара — для
 // установленной PWA единственный честный источник — физический размер экрана.
 // В обычном браузере, наоборот, честен visualViewport.
-function setAppHeight() {
-  let h;
+function appHeight() {
   if (navigator.standalone === true) {
     const portrait = matchMedia('(orientation: portrait)').matches;
-    h = portrait
+    return portrait
       ? Math.max(screen.height, screen.width)
       : Math.min(screen.height, screen.width);
-  } else {
-    h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
   }
-  document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
+  return (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+}
+
+/* Высота клавиатуры = насколько видимая область меньше экрана. Мелкие
+   расхождения (строка статуса) игнорируем: клавиатура всегда высокая. */
+function keyboardHeight(appH) {
+  const vv = window.visualViewport;
+  if (!vv) return 0;
+  const gap = appH - (vv.height + vv.offsetTop);
+  return gap > 120 ? Math.round(gap) : 0;
+}
+
+function setAppHeight() {
+  const h = Math.round(appHeight());
+  const root = document.documentElement;
+  root.style.setProperty('--app-h', h + 'px');
+  root.style.setProperty('--kb-h', keyboardHeight(h) + 'px');
 }
 window.addEventListener('resize', setAppHeight);
 window.addEventListener('orientationchange', setAppHeight);
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', setAppHeight);
+  window.visualViewport.addEventListener('scroll', setAppHeight);
 }
 setAppHeight();
+
+/* Поле, на котором стоит курсор, подводим к центру видимой части листа —
+   иначе при открытии клавиатуры печатаешь вслепую */
+document.addEventListener('focusin', (e) => {
+  const field = e.target.closest && e.target.closest('.sheet input, .sheet select, .sheet textarea');
+  if (!field) return;
+  setTimeout(() => {
+    setAppHeight();
+    field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, 300); // ждём, пока клавиатура доедет
+});
 
 const initialScreen = location.hash.replace('#', '');
 if (['home', 'ops', 'subs', 'debts', 'settings'].includes(initialScreen)) {
