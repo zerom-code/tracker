@@ -25,6 +25,7 @@ function defaultState() {
       baseCurrency: 'UAH',   // 'UAH' | 'USD'
       manualRate: null,      // если задан — используется вместо курса из сети
       monoToken: '',
+      monoLastAccount: '',   // карта, с которой импортировали в прошлый раз
       serverUrl: '',         // личный сервер уведомлений и автосинхронизации
       deviceToken: '',
       remindDays: 1,         // за сколько дней напоминать о платеже

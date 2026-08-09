@@ -168,10 +168,6 @@ async function disablePush() {
   }
 }
 
-async function sendTestPush() {
-  return serverFetch('/api/push/test', { method: 'POST', body: {} });
-}
-
 async function saveNotifySettings(patch) {
   const data = await serverFetch('/api/settings', { method: 'PUT', body: patch });
   state.sync.notify = data.settings;

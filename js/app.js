@@ -335,7 +335,6 @@ function renderSubs() {
       </div>`).join('')}
     </div>` : ''}
 
-    <p class="hint">Когда подходит дата — нажмите «✓»: платёж запишется в расходы, а дата сдвинется. У рассрочки счётчик платежей увеличится, и после последнего она закроется сама.</p>
   `;
 }
 
@@ -422,22 +421,27 @@ function renderSettings() {
     ? new Date(state.rate.updatedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : '—';
 
-  const firstSupported = state.mono.accounts.findIndex((a) => a.supported);
+  const cards = state.mono.accounts.filter((a) => a.supported);
+  const lastCard = cards.some((a) => a.id === s.monoLastAccount)
+    ? s.monoLastAccount : (cards[0] && cards[0].id);
+
   const monoBlock = s.monoToken && state.mono.accounts.length ? `
     <div class="row-sub" style="margin-bottom:8px">Подключено: <b style="color:var(--text)">${esc(state.mono.clientName || 'клиент Monobank')}</b></div>
     <div class="field">
-      <label>Счёт для импорта</label>
-      ${state.mono.accounts.map((a, i) => `
-        <label style="display:flex;align-items:center;gap:10px;padding:8px 2px;font-size:15px;color:${a.supported ? 'var(--text)' : 'var(--muted)'}">
-          <input type="radio" name="mono-acc" value="${esc(a.id)}" ${i === firstSupported ? 'checked' : ''} ${a.supported ? '' : 'disabled'}>
-          ${esc(a.maskedPan)} · ${esc(a.currency)}${a.type ? ' · ' + esc(a.type) : ''}${a.supported ? '' : ' (не поддерживается)'}
-        </label>`).join('')}
+      <label>Карта</label>
+      <select id="mono-acc">
+        ${cards.map((a) => `
+          <option value="${esc(a.id)}" ${a.id === lastCard ? 'selected' : ''}>
+            ${esc(a.maskedPan)} · ${esc(a.currency)}${a.type ? ' · ' + esc(a.type) : ''}
+          </option>`).join('')}
+      </select>
     </div>
     <div class="field">
       <label>Период</label>
       <select id="mono-days">
+        <option value="today" selected>сегодня</option>
         <option value="7">последние 7 дней</option>
-        <option value="31" selected>последние 31 день</option>
+        <option value="31">последние 31 день</option>
         <option value="custom">выбрать даты…</option>
       </select>
     </div>
@@ -456,7 +460,6 @@ function renderSettings() {
     </div>
     <button class="btn" data-action="mono-import">Импортировать операции</button>
     <button class="btn danger-ghost" data-action="mono-disconnect">Отключить Monobank</button>
-    <p class="hint">Списания станут расходами (категория — по типу магазина), переводы и снятие наличных попадут в «Переводы», поступления — в «Доходы». Уже импортированные операции не дублируются.</p>
   ` : `
     <div class="field">
       <label>Токен персонального API</label>
@@ -531,7 +534,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 19</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 20</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -613,10 +616,7 @@ function renderServerBlock() {
 
     <h3 style="margin-bottom:10px">Уведомления</h3>
     ${pushOn ? `
-      <div class="status-row ok">
-        <span>✓ Уведомления включены</span>
-        <button class="btn small secondary" data-action="push-test">Проверить</button>
-      </div>
+      <div class="status-row ok"><span>✓ Уведомления включены</span></div>
     ` : `
       <button class="btn" data-action="push-enable">Включить уведомления на этом айфоне</button>
       <p class="hint">Работает только в приложении, добавленном на экран «Домой». ${info.pushConfigured === false ? '<b>На сервере не заданы VAPID-ключи.</b>' : ''}</p>
@@ -1287,6 +1287,9 @@ async function handleMonoConnect(btn) {
 function monoImportRange() {
   const nowSec = Math.floor(Date.now() / 1000);
   const sel = document.getElementById('mono-days').value;
+  if (sel === 'today') {
+    return { fromSec: Math.floor(parseISO(todayISO()).getTime() / 1000), toSec: nowSec };
+  }
   if (sel !== 'custom') {
     const days = Number(sel) || 31;
     return { fromSec: nowSec - days * 86400, toSec: nowSec };
@@ -1304,8 +1307,8 @@ function monoImportRange() {
 }
 
 async function handleMonoImport(btn) {
-  const acc = document.querySelector('input[name="mono-acc"]:checked');
-  if (!acc) { toast('Выберите счёт'); return; }
+  const acc = document.getElementById('mono-acc');
+  if (!acc || !acc.value) { toast('Нет доступных карт — переподключите Monobank'); return; }
   let range;
   try {
     range = monoImportRange();
@@ -1316,6 +1319,8 @@ async function handleMonoImport(btn) {
   btn.disabled = true; btn.textContent = 'Импортируем…';
   try {
     const r = await monoImport(acc.value, range.fromSec, range.toSec);
+    state.settings.monoLastAccount = acc.value; // в следующий раз выберется сама
+    save();
     // если операции легли в разные месяцы — подсказать, где искать:
     // экран «Операции» показывает один месяц за раз
     const byMonth = {};
@@ -1429,13 +1434,6 @@ function handlePushDisable(btn) {
     await disablePush();
     await syncAll();
     toast('Уведомления отключены');
-  });
-}
-
-function handlePushTest(btn) {
-  withBusy(btn, 'Отправляем…', async () => {
-    const r = await sendTestPush();
-    toast(r.sent ? 'Отправлено — проверьте экран блокировки' : ('Не отправлено: ' + (r.error || 'нет подписок')));
   });
 }
 
@@ -1654,7 +1652,6 @@ document.addEventListener('click', (e) => {
     case 'mono-webhook-off': handleMonoWebhookOff(el); break;
     case 'push-enable': handlePushEnable(el); break;
     case 'push-disable': handlePushDisable(el); break;
-    case 'push-test': handlePushTest(el); break;
     case 'notify-min-save': {
       const v = parseFloat(String(document.getElementById('notify-min').value).replace(',', '.')) || 0;
       if (v < 0) { toast('Сумма не может быть отрицательной'); return; }
