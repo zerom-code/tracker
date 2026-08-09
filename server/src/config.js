@@ -25,8 +25,8 @@ export const config = {
   vapidPrivate: process.env.VAPID_PRIVATE || '',
   vapidSubject: process.env.VAPID_SUBJECT || 'mailto:tracker@example.com',
 
-  // источник приложения, которому разрешён доступ к API (CORS)
-  allowedOrigins: (process.env.ALLOWED_ORIGINS || 'https://zerom-code.github.io')
+  // адреса приложения, которым разрешён доступ к API (CORS)
+  allowedOrigins: required('ALLOWED_ORIGINS')
     .split(',').map((s) => s.trim()).filter(Boolean),
 
   dataDir: process.env.DATA_DIR || '/data',
