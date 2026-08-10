@@ -95,6 +95,9 @@ function handleWebhookPayload(raw) {
     account: data.account || '',
     ts: (item.time || Math.floor(Date.now() / 1000)) * 1000,
     amount: item.amount,
+    // сумма в валюте операции по курсу банка — нужна для показа эквивалента
+    // и сверки с долгами; amount всегда в валюте счёта
+    operationAmount: typeof item.operationAmount === 'number' ? item.operationAmount : null,
     currencyCode: item.currencyCode || 980,
     mcc: item.mcc || 0,
     description: (item.description || '').replace(/\s*\n\s*/g, ' · ').slice(0, 200),

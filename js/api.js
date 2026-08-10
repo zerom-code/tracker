@@ -120,7 +120,15 @@ function mapMonoItem(item, currency, accountId) {
   const isTransfer = !isIncome && TRANSFER_MCC.includes(item.mcc);
   const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
   const when = new Date((item.time || Math.floor(Date.now() / 1000)) * 1000);
+
+  // operationAmount — сумма в валюте операции по курсу банка на момент
+  // перевода: для «−$39.22 с долларовой» это ровно 1 750,00 ₴
+  const altCurrency = CURRENCY_BY_CODE[item.currencyCode];
+  const hasAlt = item.operationAmount && altCurrency && altCurrency !== currency;
+
   return {
+    altAmount: hasAlt ? Math.abs(item.operationAmount) / 100 : null,
+    altCurrency: hasAlt ? altCurrency : null,
     id: uid(),
     ts: when.getTime(),
     type,
@@ -174,6 +182,45 @@ function pairInternalTransfers() {
 
   if (linked) save();
   return linked;
+}
+
+/* ---------- автопогашение долгов ---------- */
+
+/**
+ * Ищет свежие операции Monobank, совпадающие по сумме с остатком открытого
+ * долга: исходящий перевод — с «я должен», поступление — с «мне должны».
+ * Сравнение идёт в валюте долга: напрямую, через сумму конвертации банка
+ * (altAmount) или по текущему курсу с допуском 3%.
+ */
+function collectDebtSuggestions() {
+  const seen = new Set(state.debtSuggestSeen || []);
+  const cutoff = Date.now() - 14 * 86400000;
+  const matches = [];
+
+  for (const t of state.transactions) {
+    if (t.source !== 'mono' || t.internal || !t.sourceId || seen.has(t.sourceId)) continue;
+    if ((t.ts || 0) < cutoff) continue;
+    const direction = t.type === 'transfer' ? 'i-owe' : (t.type === 'income' ? 'owe-me' : null);
+    if (!direction) continue;
+
+    for (const debt of activeDebts(direction)) {
+      const remaining = debtRemaining(debt);
+      if (remaining > 0 && txMatchesDebtAmount(t, debt, remaining)) {
+        matches.push({ tx: t, debt, amount: remaining });
+        break;
+      }
+    }
+  }
+  return matches;
+}
+
+function txMatchesDebtAmount(t, debt, remaining) {
+  const close = (a, b) => Math.abs(a - b) < 0.005;
+  if (t.currency === debt.currency) return close(t.amount, remaining);
+  if (t.altCurrency === debt.currency && t.altAmount != null) return close(t.altAmount, remaining);
+  if (!effectiveRate()) return false;
+  const converted = convert(t.amount, t.currency, debt.currency);
+  return Math.abs(converted - remaining) / remaining < 0.03;
 }
 
 /* Регистрирует адрес вебхука в Monobank. Запрос уходит с телефона —

@@ -50,6 +50,7 @@ function defaultState() {
     debts: [],         // {id, direction:'i-owe'|'owe-me', person, currency, date, settled, entries:[{id,amount,description,date}], payments:[{id,amount,date,note}]}
     mono: { clientName: '', accounts: [] },
     monoDeleted: [],   // id операций Monobank, удалённых вручную — не возвращать при импорте
+    debtSuggestSeen: [], // операции, по которым уже предлагали погасить долг
   };
 }
 
@@ -71,6 +72,7 @@ function load() {
       subscriptions: (data.subscriptions || []).map(normalizeSub),
       debts: (data.debts || []).map(normalizeDebt),
       monoDeleted: data.monoDeleted || [],
+      debtSuggestSeen: data.debtSuggestSeen || [],
     };
   } catch (e) {
     console.error('Не удалось прочитать данные', e);

@@ -74,6 +74,8 @@ async function syncOps() {
       id: op.monoId,
       time: Math.floor(op.ts / 1000),
       amount: op.amount,
+      operationAmount: op.operationAmount,
+      currencyCode: op.currencyCode,
       mcc: op.mcc,
       description: op.description,
     }, currency, op.account));

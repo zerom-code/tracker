@@ -246,6 +246,7 @@ function txRow(t) {
       </div>
       <div class="row-right">
         <div class="row-amount ${amountCls}">${isIn ? '+' : '−'}${fmtMoney(t.amount, t.currency)}</div>
+        ${t.altAmount ? `<div class="row-sub">≈ ${fmtMoney(t.altAmount, t.altCurrency)}</div>` : ''}
       </div>
     </div>`;
 }
@@ -540,7 +541,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 21</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 22</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -768,6 +769,7 @@ function openTxForm(tx) {
             ${segButtons([['UAH', '₴'], ['USD', '$']], t.currency)}
           </div>
         </div>
+        ${t.altAmount ? `<p class="hint" style="margin-top:6px">По курсу банка в момент операции: ${fmtMoney(t.altAmount, t.altCurrency)}</p>` : ''}
       </div>
       <div class="field" id="tx-cat-field" ${t.type === 'transfer' ? 'hidden' : ''}>
         <label>Категория</label>
@@ -1164,6 +1166,53 @@ function recalcDebtSettled(d) {
   d.settled = debtTotal(d) - debtPaid(d) <= 0.005;
 }
 
+/* ---------- автопогашение долгов по операциям ---------- */
+
+function applyDebtRepayment(m) {
+  // в заметке платежа остаётся, каким переводом погашен долг
+  const noteParts = [m.tx.description || 'Перевод'];
+  if (m.tx.currency !== m.debt.currency) {
+    noteParts.push(fmtMoney(m.tx.amount, m.tx.currency));
+  }
+  m.debt.payments.push({
+    id: uid(),
+    amount: m.amount,
+    date: m.tx.date,
+    note: noteParts.join(' · '),
+    txId: m.tx.id,
+  });
+  recalcDebtSettled(m.debt);
+}
+
+function offerDebtSuggestions() {
+  const matches = collectDebtSuggestions();
+  if (!matches.length) return;
+  let applied = 0;
+
+  for (const m of matches) {
+    state.debtSuggestSeen.push(m.tx.sourceId); // повторно не спрашиваем
+    const shown = m.tx.altAmount && m.tx.altCurrency === m.debt.currency
+      ? `${fmtMoney(m.tx.amount, m.tx.currency)} (${fmtMoney(m.tx.altAmount, m.tx.altCurrency)})`
+      : fmtMoney(m.tx.amount, m.tx.currency);
+    const question = m.tx.type === 'transfer'
+      ? `Перевод «${m.tx.description || 'без описания'}» на ${shown} совпадает с вашим долгом «${m.debt.person}» (осталось ${fmtMoney(m.amount, m.debt.currency)}).\n\nОтметить долг погашенным этим переводом?`
+      : `Поступление «${m.tx.description || 'без описания'}» на ${shown} совпадает с долгом «${m.debt.person}» перед вами (осталось ${fmtMoney(m.amount, m.debt.currency)}).\n\nОтметить долг погашенным?`;
+    if (confirm(question)) {
+      applyDebtRepayment(m);
+      applied++;
+    }
+  }
+
+  if (state.debtSuggestSeen.length > 500) {
+    state.debtSuggestSeen = state.debtSuggestSeen.slice(-500);
+  }
+  save();
+  if (applied) {
+    render();
+    toast(applied === 1 ? 'Долг погашен 🎉' : `Погашено долгов: ${applied} 🎉`);
+  }
+}
+
 function submitDebtEntryForm(form) {
   const debt = state.debts.find((d) => d.id === form.dataset.debt);
   if (!debt) return;
@@ -1346,6 +1395,7 @@ async function handleMonoImport(btn) {
       ? `Добавлено операций: ${r.added}` + (r.incomes ? ` (доходов: ${r.incomes})` : '') +
         (months.length > 1 ? `\n${months.join(', ')}` : '')
       : 'Новых операций нет' + (r.duplicates ? ` (дублей: ${r.duplicates})` : ''));
+    if (r.added) setTimeout(offerDebtSuggestions, 400);
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Импортировать операции';
     toast(e.message);
@@ -1827,6 +1877,7 @@ function backgroundSync() {
       state.sync.lastError = '';
       save();
       if (added || hadError) render();
+      if (added) offerDebtSuggestions();
     })
     .catch((e) => {
       syncFailures++;
@@ -1840,6 +1891,8 @@ backgroundSync();
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) backgroundSync();
 });
+// проверяем и уже накопленные операции — вдруг среди них есть возврат долга
+setTimeout(offerDebtSuggestions, 1200);
 setInterval(() => { if (!document.hidden) backgroundSync(); }, 60_000);
 
 if ('serviceWorker' in navigator &&
