@@ -212,8 +212,16 @@ function isOutflow(t) {
   return t.type === 'expense' || t.type === 'transfer';
 }
 
+/* Сумма операции в валюте учёта. Если известен точный эквивалент по курсу
+   банка на момент операции, берём его: пересчёт по сегодняшнему курсу дал бы
+   другую цифру, хотя потрачена была именно эта сумма. */
+function txBase(t) {
+  if (t.altAmount && t.altCurrency === state.settings.baseCurrency) return t.altAmount;
+  return toBase(t.amount, t.currency);
+}
+
 function sumBase(list) {
-  return list.reduce((acc, t) => acc + toBase(t.amount, t.currency), 0);
+  return list.reduce((acc, t) => acc + txBase(t), 0);
 }
 
 function subMonthlyBase(sub) {

@@ -81,7 +81,7 @@ function renderHome() {
   const byCat = {};
   for (const t of txOfMonth(y, m, 'expense')) {
     const id = t.categoryId || FALLBACK_CATEGORY;
-    byCat[id] = (byCat[id] || 0) + toBase(t.amount, t.currency);
+    byCat[id] = (byCat[id] || 0) + txBase(t);
   }
   if (transfersBase > 0) byCat[TRANSFERS_ROW] = transfersBase;
   const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 7);
@@ -541,7 +541,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 23</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 24</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -744,6 +744,22 @@ function parseAmount(str) {
 
 /* --- операция (расход / перевод) --- */
 
+/* Эквивалент в другой валюте: банк присылает его не всегда (для прямого
+   перевода с долларовой карты гривневая сумма в выписку не попадает),
+   поэтому её можно вписать вручную — она видна в списке и участвует
+   в сверке с долгами. */
+function altFieldLabel(currency) {
+  const other = otherCurrency(currency);
+  return `Сумма в ${other === 'UAH' ? '₴' : '$'} по курсу банка (необязательно)`;
+}
+
+function altFieldPlaceholder(t) {
+  const amount = parseAmount(t.amount) || 0;
+  if (!amount || !effectiveRate()) return 'например 1750';
+  const est = convert(amount, t.currency, otherCurrency(t.currency));
+  return 'примерно ' + est.toFixed(2);
+}
+
 function openTxForm(tx) {
   const isNew = !tx;
   const defaultType = { transfer: 'transfer', income: 'income' }[ui.opsFilter] || 'expense';
@@ -769,7 +785,12 @@ function openTxForm(tx) {
             ${segButtons([['UAH', '₴'], ['USD', '$']], t.currency)}
           </div>
         </div>
-        ${t.altAmount ? `<p class="hint" style="margin-top:6px">По курсу банка в момент операции: ${fmtMoney(t.altAmount, t.altCurrency)}</p>` : ''}
+      </div>
+      <div class="field" id="tx-alt-field">
+        <label id="tx-alt-label">${altFieldLabel(t.currency)}</label>
+        <input id="tx-alt" type="text" inputmode="decimal"
+               placeholder="${altFieldPlaceholder(t)}"
+               value="${t.altAmount && t.altCurrency === otherCurrency(t.currency) ? t.altAmount : ''}">
       </div>
       <div class="field" id="tx-cat-field" ${t.type === 'transfer' ? 'hidden' : ''}>
         <label>Категория</label>
@@ -812,15 +833,18 @@ function submitTxForm(form) {
   const categoryId = type !== 'transfer' ? (catBtn ? catBtn.dataset.cat : FALLBACK_CATEGORY) : null;
   const internalEl = document.getElementById('tx-internal');
   const internal = type !== 'expense' && !!(internalEl && internalEl.checked);
+  const altValue = parseAmount(document.getElementById('tx-alt').value);
+  const altAmount = altValue || null;
+  const altCurrency = altValue ? otherCurrency(currency) : null;
   const id = form.dataset.id;
   if (id) {
     const t = state.transactions.find((x) => x.id === id);
     if (!t) return;
-    Object.assign(t, { type, amount, currency, date, description, categoryId, internal });
+    Object.assign(t, { type, amount, currency, date, description, categoryId, internal, altAmount, altCurrency });
   } else {
     state.transactions.push({
       id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
-      internal, source: 'manual', sourceId: null,
+      internal, altAmount, altCurrency, source: 'manual', sourceId: null,
     });
   }
   save(); closeSheet(); render();
@@ -1578,6 +1602,17 @@ document.addEventListener('click', (e) => {
       if (catField) catField.hidden = seg.dataset.val === 'transfer';
       const internalField = document.getElementById('tx-internal-field');
       if (internalField) internalField.hidden = seg.dataset.val === 'expense';
+    }
+    if (seg.parentElement.id === 'tx-cur-seg') {
+      const label = document.getElementById('tx-alt-label');
+      const input = document.getElementById('tx-alt');
+      if (label) label.textContent = altFieldLabel(seg.dataset.val);
+      if (input) {
+        input.placeholder = altFieldPlaceholder({
+          amount: document.getElementById('tx-amount').value, currency: seg.dataset.val,
+        });
+        input.value = ''; // прежний эквивалент относился к другой валюте
+      }
     }
     return;
   }
