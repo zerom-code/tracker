@@ -115,20 +115,24 @@ function categoryForMcc(mcc) {
 
 /* Операция Monobank → операция трекера. Одна и та же логика нужна и при
    ручном импорте выписки, и при автосинхронизации через вебхук. */
+/* operationAmount — сумма в валюте операции по курсу банка на момент
+   перевода: для «−$39.22 с долларовой» это ровно 1 750,00 ₴ */
+function monoAltOf(item, accountCurrency) {
+  const altCurrency = CURRENCY_BY_CODE[item.currencyCode];
+  if (!item.operationAmount || !altCurrency || altCurrency === accountCurrency) return null;
+  return { amount: Math.abs(item.operationAmount) / 100, currency: altCurrency };
+}
+
 function mapMonoItem(item, currency, accountId) {
   const isIncome = item.amount > 0;
   const isTransfer = !isIncome && TRANSFER_MCC.includes(item.mcc);
   const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
   const when = new Date((item.time || Math.floor(Date.now() / 1000)) * 1000);
-
-  // operationAmount — сумма в валюте операции по курсу банка на момент
-  // перевода: для «−$39.22 с долларовой» это ровно 1 750,00 ₴
-  const altCurrency = CURRENCY_BY_CODE[item.currencyCode];
-  const hasAlt = item.operationAmount && altCurrency && altCurrency !== currency;
+  const alt = monoAltOf(item, currency);
 
   return {
-    altAmount: hasAlt ? Math.abs(item.operationAmount) / 100 : null,
-    altCurrency: hasAlt ? altCurrency : null,
+    altAmount: alt ? alt.amount : null,
+    altCurrency: alt ? alt.currency : null,
     id: uid(),
     ts: when.getTime(),
     type,
@@ -255,11 +259,24 @@ async function monoImport(accountId, fromSec, toSec) {
   const known = new Set(state.transactions.map((t) => t.sourceId).filter(Boolean));
   const deleted = new Set(state.monoDeleted || []);
   const addedDates = [];
-  let added = 0, incomes = 0, duplicates = 0;
+  const tombstoned = []; // удалены вручную — вернём только с согласия
+  let added = 0, incomes = 0, duplicates = 0, backfilled = 0;
 
   for (const it of items) {
     if (!it.amount) continue;
-    if (known.has(it.id) || deleted.has(it.id)) { duplicates++; continue; }
+    if (deleted.has(it.id)) { tombstoned.push(it); continue; }
+    if (known.has(it.id)) {
+      duplicates++;
+      // операции, загруженные до появления эквивалента, дозаполняем
+      const existing = state.transactions.find((t) => t.sourceId === it.id);
+      const alt = existing && existing.altAmount == null && monoAltOf(it, account.currency);
+      if (alt) {
+        existing.altAmount = alt.amount;
+        existing.altCurrency = alt.currency;
+        backfilled++;
+      }
+      continue;
+    }
     const tx = mapMonoItem(it, account.currency, accountId);
     addedDates.push(tx.date);
     state.transactions.push(tx);
@@ -267,9 +284,23 @@ async function monoImport(accountId, fromSec, toSec) {
     if (tx.type === 'income') incomes++;
   }
 
-  if (added) {
+  if (added || backfilled) {
     save();
-    pairInternalTransfers();
+    if (added) pairInternalTransfers();
   }
-  return { added, incomes, duplicates, addedDates };
+  return { added, incomes, duplicates, addedDates, tombstoned, backfilled };
+}
+
+/** Возвращает вручную удалённые операции: убирает их из чёрного списка и добавляет заново */
+function monoRestoreItems(items, accountId) {
+  const account = state.mono.accounts.find((a) => a.id === accountId);
+  if (!account || !items.length) return 0;
+  const ids = new Set(items.map((i) => i.id));
+  state.monoDeleted = (state.monoDeleted || []).filter((id) => !ids.has(id));
+  for (const it of items) {
+    state.transactions.push(mapMonoItem(it, account.currency, accountId));
+  }
+  save();
+  pairInternalTransfers();
+  return items.length;
 }

@@ -541,7 +541,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 22</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 23</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1395,7 +1395,15 @@ async function handleMonoImport(btn) {
       ? `Добавлено операций: ${r.added}` + (r.incomes ? ` (доходов: ${r.incomes})` : '') +
         (months.length > 1 ? `\n${months.join(', ')}` : '')
       : 'Новых операций нет' + (r.duplicates ? ` (дублей: ${r.duplicates})` : ''));
-    if (r.added) setTimeout(offerDebtSuggestions, 400);
+
+    // операции из чёрного списка возвращаем только с согласия
+    if (r.tombstoned.length && confirm(
+      `${r.tombstoned.length === 1 ? 'Одну операцию из этого периода вы раньше удалили' : `Операций из этого периода, удалённых вами раньше: ${r.tombstoned.length}`} из трекера.\n\nВернуть ${r.tombstoned.length === 1 ? 'её' : 'их'}?`)) {
+      const restored = monoRestoreItems(r.tombstoned, acc.value);
+      render();
+      toast(`Возвращено операций: ${restored}`);
+    }
+    if (r.added || r.tombstoned.length) setTimeout(offerDebtSuggestions, 400);
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Импортировать операции';
     toast(e.message);
