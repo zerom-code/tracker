@@ -245,6 +245,7 @@ input[type="checkbox"]:checked::after {
 .row-amount.expense { color: var(--text); }
 .row-amount.transfer { color: var(--accent); }
 .row-amount.positive { color: var(--green); }
+.row-amount.internal { color: var(--muted); font-weight: 500; }
 .row-amount.negative { color: var(--red); }
 
 .group-label {

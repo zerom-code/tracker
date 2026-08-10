@@ -64,7 +64,11 @@ async function syncOps() {
   for (const op of data.items || []) {
     if (!op.amount) continue;
     if (known.has(op.monoId) || deleted.has(op.monoId)) continue;
-    const currency = CODE_TO_CURRENCY[op.currencyCode];
+    // сумма операции всегда в валюте счёта; currencyCode из вебхука — валюта
+    // операции (у перевода с долларовой карты это USD), опираться на него нельзя
+    const account = state.mono.accounts.find((a) => a.id === op.account);
+    const currency = (account && account.supported && account.currency) ||
+      CODE_TO_CURRENCY[op.currencyCode];
     if (!currency) continue; // счета в других валютах трекер не ведёт
     state.transactions.push(mapMonoItem({
       id: op.monoId,
@@ -72,7 +76,7 @@ async function syncOps() {
       amount: op.amount,
       mcc: op.mcc,
       description: op.description,
-    }, currency));
+    }, currency, op.account));
     known.add(op.monoId);
     added++;
   }
@@ -80,6 +84,7 @@ async function syncOps() {
   state.sync.cursor = data.cursor || since;
   state.sync.lastAt = Date.now();
   save();
+  if (added) pairInternalTransfers();
   return added;
 }
 
@@ -118,7 +123,12 @@ function buildReminders() {
 
 async function syncReminders() {
   const reminders = buildReminders();
-  await serverFetch('/api/reminders', { method: 'PUT', body: { reminders } });
+  // карта «счёт → валюта», чтобы сервер писал верную валюту в уведомлениях
+  const accounts = {};
+  for (const a of state.mono.accounts) {
+    if (a.supported) accounts[a.id] = a.currency === 'USD' ? 840 : 980;
+  }
+  await serverFetch('/api/reminders', { method: 'PUT', body: { reminders, accounts } });
   return reminders.length;
 }
 

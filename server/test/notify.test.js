@@ -49,6 +49,24 @@ test('текст уведомления: продавец в заголовке,
   assert.equal(n.tag, 'op-abc');
 });
 
+test('валюта берётся по счёту, а не из currencyCode операции', () => {
+  // перевод с долларовой на гривневую: сумма в копейках, currencyCode = 840
+  const n = buildOpNotification({
+    monoId: 'x1', account: 'uah-black', amount: 198530, currencyCode: 840,
+    mcc: 4829, description: 'З доларової картки', balance: 250000,
+  }, { 'uah-black': 980, 'usd-black': 840 });
+  assert.match(n.body, /₴/);
+  assert.doesNotMatch(n.body, /\$/);
+});
+
+test('незнакомый счёт откатывается на currencyCode', () => {
+  const n = buildOpNotification({
+    monoId: 'x2', account: 'unknown', amount: -1299, currencyCode: 840,
+    mcc: 5411, description: '', balance: null,
+  }, { 'uah-black': 980 });
+  assert.match(n.body, /\$/);
+});
+
 test('без описания подставляется тип операции, без баланса — только сумма', () => {
   const n = buildOpNotification({
     monoId: 'x', amount: 16000, currencyCode: 980, mcc: 4829, description: '', balance: null,

@@ -32,16 +32,18 @@ export function shouldNotify(op, settings) {
   return true;
 }
 
-export function buildOpNotification(op) {
+export function buildOpNotification(op, accounts = {}) {
   const kind = opKind(op);
   const label = { income: 'Поступление', transfer: 'Перевод', expense: 'Трата' }[kind];
   const title = (op.description || '').trim() || label;
-  const parts = [fmtAmount(op.amount, op.currencyCode)];
+  // сумма и баланс всегда в валюте счёта; currencyCode операции может отличаться
+  const code = accounts[op.account] || op.currencyCode;
+  const parts = [fmtAmount(op.amount, code)];
   if (Number.isFinite(op.balance)) {
     const bal = new Intl.NumberFormat('uk-UA', {
       minimumFractionDigits: 2, maximumFractionDigits: 2,
     }).format(op.balance / 100);
-    parts.push(`остаток ${bal} ${SYMBOL[op.currencyCode] || ''}`.trim());
+    parts.push(`остаток ${bal} ${SYMBOL[code] || ''}`.trim());
   }
   return {
     title,

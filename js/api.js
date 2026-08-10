@@ -115,7 +115,7 @@ function categoryForMcc(mcc) {
 
 /* Операция Monobank → операция трекера. Одна и та же логика нужна и при
    ручном импорте выписки, и при автосинхронизации через вебхук. */
-function mapMonoItem(item, currency) {
+function mapMonoItem(item, currency, accountId) {
   const isIncome = item.amount > 0;
   const isTransfer = !isIncome && TRANSFER_MCC.includes(item.mcc);
   const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
@@ -131,7 +131,49 @@ function mapMonoItem(item, currency) {
     date: toISO(when),
     source: 'mono',
     sourceId: item.id,
+    accountId: accountId || null,
+    internal: false,
   };
+}
+
+/**
+ * Ищет пары «перевод между своими картами»: списание и зачисление, близкие
+ * по времени, на одинаковую сумму (для разных валют — эквивалентную по курсу).
+ * Помеченные пары остаются в списке, но не попадают в итоги — иначе перевод
+ * себе раздувает и расходы, и доходы, хотя в сумме это ноль.
+ */
+function pairInternalTransfers() {
+  const WINDOW = 3 * 60 * 1000;
+  const TOLERANCE = 0.08;
+  const candidates = state.transactions.filter((t) => t.source === 'mono' && !t.internal);
+  const outs = candidates.filter((t) => t.type === 'transfer');
+  const ins = candidates.filter((t) => t.type === 'income');
+  let linked = 0;
+
+  for (const out of outs) {
+    for (const inn of ins) {
+      if (inn.internal) continue;
+      if (out.accountId && inn.accountId && out.accountId === inn.accountId) continue;
+      if (Math.abs((out.ts || 0) - (inn.ts || 0)) > WINDOW) continue;
+
+      let match = false;
+      if (out.currency === inn.currency) {
+        match = Math.abs(out.amount - inn.amount) < 0.01;
+      } else if (effectiveRate()) {
+        const converted = convert(out.amount, out.currency, inn.currency);
+        match = Math.abs(converted - inn.amount) / inn.amount < TOLERANCE;
+      }
+      if (match) {
+        out.internal = true;
+        inn.internal = true;
+        linked++;
+        break;
+      }
+    }
+  }
+
+  if (linked) save();
+  return linked;
 }
 
 /* Регистрирует адрес вебхука в Monobank. Запрос уходит с телефона —
@@ -171,13 +213,16 @@ async function monoImport(accountId, fromSec, toSec) {
   for (const it of items) {
     if (!it.amount) continue;
     if (known.has(it.id) || deleted.has(it.id)) { duplicates++; continue; }
-    const tx = mapMonoItem(it, account.currency);
+    const tx = mapMonoItem(it, account.currency, accountId);
     addedDates.push(tx.date);
     state.transactions.push(tx);
     added++;
     if (tx.type === 'income') incomes++;
   }
 
-  if (added) save();
+  if (added) {
+    save();
+    pairInternalTransfers();
+  }
   return { added, incomes, duplicates, addedDates };
 }

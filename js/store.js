@@ -42,7 +42,8 @@ function defaultState() {
     },
     rate: { usdUah: 42, updatedAt: 0, source: 'по умолчанию' },
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
-    transactions: [],  // {id, ts, type:'expense'|'transfer', amount, currency, categoryId, description, date, source, sourceId}
+    // internal=true — перевод между своими картами: виден в списке, но не входит в итоги
+    transactions: [],  // {id, ts, type:'expense'|'transfer'|'income', amount, currency, categoryId, description, date, source, sourceId, accountId, internal}
     // подписка с plan — это рассрочка/кредит: конечное число платежей
     subscriptions: [], // {id, name, amount, currency, period:'month'|'year', nextDate, active, plan:{total,paid,lender}|null}
     // долг — контейнер: entries (за что, сколько) + payments (погашения)
@@ -193,14 +194,16 @@ function txSorted() {
 
 function txOfMonth(year, month, type) {
   const prefix = year + '-' + String(month + 1).padStart(2, '0');
+  // выборка с типом идёт в итоги, поэтому переводы между своими исключаются
   return state.transactions.filter((t) =>
-    t.date.startsWith(prefix) && (!type || t.type === type));
+    t.date.startsWith(prefix) && (!type || (t.type === type && !t.internal)));
 }
 
 /* Расход — это все деньги, ушедшие со счёта: и траты, и переводы.
    Переводы дополнительно показываются отдельной строкой внутри этой суммы. */
 function outflowOfMonth(year, month) {
-  return txOfMonth(year, month).filter((t) => t.type === 'expense' || t.type === 'transfer');
+  return txOfMonth(year, month).filter((t) =>
+    (t.type === 'expense' || t.type === 'transfer') && !t.internal);
 }
 
 function isOutflow(t) {

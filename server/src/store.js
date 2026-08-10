@@ -22,6 +22,7 @@ function emptyData() {
       reminders: true,      // напоминания о подписках и рассрочках
     },
     reminders: [],      // {key, title, body, fireAt, sentAt}
+    accounts: {},       // счёт → код валюты (ISO 4217): суммы вебхука всегда в валюте счёта
     stats: { lastHookAt: 0, hookCount: 0, lastPushAt: 0, lastPushError: '' },
   };
 }
@@ -124,6 +125,18 @@ export class Store {
     this.save();
     return this.data.reminders.length;
   }
+
+  setAccounts(map) {
+    if (!map || typeof map !== 'object') return;
+    const clean = {};
+    for (const [id, code] of Object.entries(map)) {
+      if (typeof id === 'string' && Number.isFinite(code)) clean[id] = code;
+    }
+    this.data.accounts = clean;
+    this.save();
+  }
+
+  get accounts() { return this.data.accounts || {}; }
 
   dueReminders(now = Date.now()) {
     return this.data.reminders.filter((r) => !r.sentAt && r.fireAt <= now);

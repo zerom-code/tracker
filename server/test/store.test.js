@@ -75,6 +75,16 @@ test('напоминание срабатывает по времени и то�
   assert.deepEqual(s.dueReminders(), []);
 });
 
+test('карта счетов сохраняется, мусор отбрасывается', () => {
+  const s = tmpStore();
+  s.setAccounts({ 'uah-1': 980, 'usd-1': 840, bad: 'oops' });
+  assert.deepEqual(s.accounts, { 'uah-1': 980, 'usd-1': 840 });
+  const again = new Store(path.dirname(s.file));
+  assert.deepEqual(again.accounts, { 'uah-1': 980, 'usd-1': 840 });
+  s.setAccounts(null); // не должно упасть и не должно затереть
+  assert.deepEqual(s.accounts, { 'uah-1': 980, 'usd-1': 840 });
+});
+
 test('битый файл данных не роняет сервис', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tracker-broken-'));
   fs.writeFileSync(path.join(dir, 'data.json'), '{ это не json');

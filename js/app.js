@@ -164,9 +164,13 @@ function renderHome() {
 
 function renderOps() {
   const { opsY: y, opsM: m } = ui;
-  // «Расходы» показывают и переводы — они тоже расход, просто отдельного вида
-  const matchesFilter = (t) => ui.opsFilter === 'all' ||
-    (ui.opsFilter === 'expense' ? isOutflow(t) : t.type === ui.opsFilter);
+  // «Расходы» показывают и переводы — они тоже расход, просто отдельного вида.
+  // Переводы между своими не считаются нигде и видны в «Все» и «Переводы».
+  const matchesFilter = (t) => {
+    if (ui.opsFilter === 'all') return true;
+    if (t.internal) return ui.opsFilter === 'transfer';
+    return ui.opsFilter === 'expense' ? isOutflow(t) : t.type === ui.opsFilter;
+  };
   const monthTx = txOfMonth(y, m).filter(matchesFilter);
   const sorted = monthTx.sort((a, b) =>
     a.date === b.date ? (b.ts || 0) - (a.ts || 0) : (a.date < b.date ? 1 : -1));
@@ -223,14 +227,16 @@ function txRow(t) {
   const isTr = t.type === 'transfer';
   const isIn = t.type === 'income';
   const cat = isTr ? null : categoryById(t.categoryId);
-  const emoji = isTr ? '🔁' : (isIn && (!t.categoryId || t.categoryId === FALLBACK_CATEGORY) ? '💰' : cat.emoji);
+  const emoji = t.internal ? '🔄'
+    : (isTr ? '🔁' : (isIn && (!t.categoryId || t.categoryId === FALLBACK_CATEGORY) ? '💰' : cat.emoji));
   const title = t.description || (isTr ? 'Перевод' : (isIn ? 'Доход' : cat.name));
   const subParts = [];
-  if (isTr) subParts.push('Перевод');
+  if (t.internal) subParts.push('Между своими');
+  else if (isTr) subParts.push('Перевод');
   else if (isIn) subParts.push(t.categoryId && t.categoryId !== FALLBACK_CATEGORY ? 'Доход · ' + cat.name : 'Доход');
   else subParts.push(cat.name);
   if (t.source === 'mono') subParts.push('Monobank');
-  const amountCls = isIn ? 'positive' : (isTr ? 'transfer' : 'expense');
+  const amountCls = t.internal ? 'internal' : (isIn ? 'positive' : (isTr ? 'transfer' : 'expense'));
   return `
     <div class="row" data-action="edit-tx" data-id="${t.id}">
       <div class="row-emoji">${emoji}</div>
@@ -534,7 +540,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 20</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 21</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -775,6 +781,12 @@ function openTxForm(tx) {
         <label>${t.type === 'transfer' ? 'Кому / описание' : 'Описание'}</label>
         <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: маме на карту' : (t.type === 'income' ? 'например: зарплата' : 'например: кофе с собой')}" value="${esc(t.description)}">
       </div>
+      <div class="field" id="tx-internal-field" ${t.type === 'expense' ? 'hidden' : ''}>
+        <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
+          <input id="tx-internal" type="checkbox" ${t.internal ? 'checked' : ''}>
+          Между своими картами (не считать в итогах)
+        </label>
+      </div>
       <div class="field">
         <label>Дата</label>
         <input id="tx-date" type="date" value="${t.date}" required>
@@ -796,15 +808,17 @@ function submitTxForm(form) {
   const description = document.getElementById('tx-desc').value.trim();
 
   const categoryId = type !== 'transfer' ? (catBtn ? catBtn.dataset.cat : FALLBACK_CATEGORY) : null;
+  const internalEl = document.getElementById('tx-internal');
+  const internal = type !== 'expense' && !!(internalEl && internalEl.checked);
   const id = form.dataset.id;
   if (id) {
     const t = state.transactions.find((x) => x.id === id);
     if (!t) return;
-    Object.assign(t, { type, amount, currency, date, description, categoryId });
+    Object.assign(t, { type, amount, currency, date, description, categoryId, internal });
   } else {
     state.transactions.push({
       id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
-      source: 'manual', sourceId: null,
+      internal, source: 'manual', sourceId: null,
     });
   }
   save(); closeSheet(); render();
@@ -1504,6 +1518,8 @@ document.addEventListener('click', (e) => {
     if (seg.parentElement.id === 'tx-type-seg') {
       const catField = document.getElementById('tx-cat-field');
       if (catField) catField.hidden = seg.dataset.val === 'transfer';
+      const internalField = document.getElementById('tx-internal-field');
+      if (internalField) internalField.hidden = seg.dataset.val === 'expense';
     }
     return;
   }

@@ -132,7 +132,8 @@ async function route(req, res, url, origin) {
     if (!op) return;
     console.log(`[hook] ${op.description} ${op.amount / 100}`);
     if (pushConfigured() && shouldNotify(op, store.settings)) {
-      sendPush(store, buildOpNotification(op)).catch((e) => console.error('[push]', e.message));
+      sendPush(store, buildOpNotification(op, store.accounts))
+        .catch((e) => console.error('[push]', e.message));
     }
     return;
   }
@@ -195,6 +196,7 @@ async function route(req, res, url, origin) {
   if (path === '/api/reminders' && req.method === 'PUT') {
     const body = JSON.parse(await readBody(req) || '{}');
     const count = store.replaceReminders(Array.isArray(body.reminders) ? body.reminders : []);
+    store.setAccounts(body.accounts); // заодно освежаем карту «счёт → валюта»
     return json(res, 200, { ok: true, reminders: count }, origin);
   }
 
