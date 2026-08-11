@@ -50,6 +50,6 @@ export function buildOpNotification(op, accounts = {}) {
     body: parts.join(' · '),
     tag: 'op-' + op.monoId,
     kind,
-    url: '/#ops',
+    url: '#ops',
   };
 }

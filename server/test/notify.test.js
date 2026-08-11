@@ -67,6 +67,12 @@ test('незнакомый счёт откатывается на currencyCode',
   assert.match(n.body, /\$/);
 });
 
+test('ссылка в уведомлении относительная — сайт может жить в подпапке (GitHub Pages)', () => {
+  const n = buildOpNotification({ monoId: 'z', amount: -100, currencyCode: 980, mcc: 5411 });
+  assert.equal(n.url, '#ops');
+  assert.doesNotMatch(n.url, /^\//); // абсолютный путь резолвился бы от корня домена
+});
+
 test('без описания подставляется тип операции, без баланса — только сумма', () => {
   const n = buildOpNotification({
     monoId: 'x', amount: 16000, currencyCode: 980, mcc: 4829, description: '', balance: null,

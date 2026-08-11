@@ -1,7 +1,7 @@
 /* Сервис-воркер: кэшируем оболочку приложения, чтобы трекер открывался офлайн.
    Запросы к API (Monobank, НБУ) всегда идут в сеть. */
 
-const CACHE = 'tracker-v24';
+const CACHE = 'tracker-v25';
 const ASSETS = [
   './',
   './index.html',
@@ -29,29 +29,35 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-/* Push-уведомления от личного сервера: новые операции и напоминания о платежах */
+/* Push-уведомления от личного сервера: новые операции и напоминания о платежах.
+   Сервер шлёт относительный адрес ('#ops', '#subs'), а не абсолютный путь —
+   на GitHub Pages сайт живёт в подпапке (/<репозиторий>/), и путь вида '/#ops'
+   резолвился бы от корня домена, унося на несуществующую страницу. Разрешаем
+   его против scope самого service worker'а — это и есть фактический адрес
+   установленного сайта, независимо от того, как называется репозиторий. */
 self.addEventListener('push', (e) => {
   let data = {};
   try { data = e.data ? e.data.json() : {}; } catch (err) { /* оставим заглушку ниже */ }
+  const url = new URL(data.url || '', self.registration.scope).href;
   e.waitUntil(
     self.registration.showNotification(data.title || 'Трекер трат', {
       body: data.body || '',
       tag: data.tag || 'tracker',
       icon: './icons/icon-180.png',
       badge: './icons/icon-180.png',
-      data: { url: data.url || './' },
+      data: { url },
     })
   );
 });
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const target = (e.notification.data && e.notification.data.url) || './';
+  const target = (e.notification.data && e.notification.data.url) || self.registration.scope;
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const client of list) {
         if ('focus' in client) {
-          if ('navigate' in client && target !== './') client.navigate(target).catch(() => {});
+          if ('navigate' in client) client.navigate(target).catch(() => {});
           return client.focus();
         }
       }

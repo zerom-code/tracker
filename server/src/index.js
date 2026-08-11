@@ -191,7 +191,7 @@ async function route(req, res, url, origin) {
       title: 'Трекер трат',
       body: 'Уведомления работают 🎉',
       tag: 'test',
-      url: '/',
+      url: '',
     });
     return json(res, result.error && !result.sent ? 502 : 200, result, origin);
   }
@@ -214,7 +214,7 @@ async function tickReminders() {
   if (!store.settings.reminders || !pushConfigured()) return;
   for (const r of store.dueReminders()) {
     const result = await sendPush(store, {
-      title: r.title, body: r.body, tag: 'rem-' + r.key, url: '/#subs',
+      title: r.title, body: r.body, tag: 'rem-' + r.key, url: '#subs',
     });
     if (result.sent) {
       store.markReminderSent(r.key);

@@ -108,15 +108,15 @@ function buildReminders() {
     fire.setDate(fire.getDate() - days);
     fire.setHours(hour, 0, 0, 0);
 
-    const when = days === 0 ? 'сегодня' : (days === 1 ? 'завтра' : `через ${days} дн.`);
+    const when = days === 0 ? 'Сегодня спишется' : (days === 1 ? 'Завтра спишется' : `Через ${days} дн. спишется`);
     const amount = fmtMoney(s.amount, s.currency);
     const body = isCredit(s)
-      ? `${amount} · платёж ${Math.min(s.plan.paid + 1, s.plan.total)} из ${s.plan.total} · ${when}`
-      : `${amount} · ${when}`;
+      ? `${when} ${amount} — платёж ${Math.min(s.plan.paid + 1, s.plan.total)} из ${s.plan.total}`
+      : `${when} ${amount}`;
 
     return {
       key: s.id + '@' + s.nextDate,
-      title: (isCredit(s) ? 'Платёж по рассрочке: ' : 'Списание: ') + s.name,
+      title: s.name,
       body,
       fireAt: fire.getTime(),
     };

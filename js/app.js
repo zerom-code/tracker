@@ -541,7 +541,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 24</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 25</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
