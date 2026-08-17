@@ -610,7 +610,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 35</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 36</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -969,6 +969,8 @@ function submitTxForm(form) {
       internal, altAmount, altCurrency, receiptUrl, source: 'manual', sourceId: null,
     });
   }
+  const [ty, tm] = date.split('-').map(Number);
+  if (ty && tm) { ui.opsY = ty; ui.opsM = tm - 1; }
   save(); closeSheet(); render();
 }
 
@@ -1140,7 +1142,8 @@ function openReceiptPreviewModal(receipt) {
         <p class="hint">Можете дополнить покупками (например: ${esc(storeName)} (Салфетки, курица))</p>
       </div>
 
-      <button class="btn" data-action="apply-receipt-full">Применить описание, сумму и дату</button>
+      <button class="btn" data-action="apply-receipt-save">Сохранить операцию с чеком ✨</button>
+      <button class="btn secondary" data-action="apply-receipt-full" style="margin-top:8px">Отредактировать в форме</button>
       <button class="btn secondary" data-action="apply-receipt-desc-only" style="margin-top:8px">Вставить только описание</button>
       ${receipt.rawUrl ? `<a href="${esc(receipt.rawUrl)}" target="_blank" rel="noopener" class="btn secondary" style="margin-top:8px;text-align:center;text-decoration:none;display:block">Открыть оригинал на сайте ДПС ↗</a>` : ''}
     </div>
@@ -2056,6 +2059,41 @@ document.addEventListener('click', async (e) => {
       }
       if (ui.tempTxForm) ui.tempTxForm.receiptUrl = '';
       toast('Чек откреплён');
+      break;
+    }
+    case 'apply-receipt-save': {
+      const r = ui.pendingReceipt;
+      if (r) {
+        const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
+        const descInput = document.getElementById('preview-receipt-desc');
+        const description = descInput ? descInput.value.trim() : formatReceiptDescription(r, storeHint);
+        const amount = r.amount || (ui.tempTxForm && ui.tempTxForm.amount) || 0;
+        const date = r.date || (ui.tempTxForm && ui.tempTxForm.date) || todayISO();
+        const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(r.storeName || storeHint, r.fn) : null;
+        const categoryId = (merchant && merchant.category) || (ui.tempTxForm && ui.tempTxForm.categoryId) || 'products';
+        const receiptUrl = r.rawUrl || (ui.tempTxForm && ui.tempTxForm.receiptUrl) || '';
+        const type = (ui.tempTxForm && ui.tempTxForm.type) || 'expense';
+        const currency = (ui.tempTxForm && ui.tempTxForm.currency) || 'UAH';
+
+        if (ui.tempTxForm && ui.tempTxForm.id) {
+          const t = state.transactions.find((x) => x.id === ui.tempTxForm.id);
+          if (t) {
+            Object.assign(t, { description, amount, date, categoryId, receiptUrl, type, currency });
+          }
+        } else {
+          state.transactions.push({
+            id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
+            internal: false, altAmount: null, altCurrency: null, receiptUrl, source: 'manual', sourceId: null,
+          });
+        }
+
+        const [ty, tm] = date.split('-').map(Number);
+        if (ty && tm) { ui.opsY = ty; ui.opsM = tm - 1; }
+        ui.screen = 'ops';
+        history.replaceState(null, '', '#ops');
+        save(); closeSheet(); render();
+        toast('Операция сохранена с чеком ✨');
+      }
       break;
     }
     case 'apply-receipt-full': {
