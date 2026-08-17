@@ -203,6 +203,24 @@ async function route(req, res, url, origin) {
     return json(res, 200, { ok: true, reminders: count }, origin);
   }
 
+  if (path === '/api/receipt' && req.method === 'GET') {
+    const targetUrl = url.searchParams.get('url');
+    if (!targetUrl) return json(res, 400, { error: 'url required' }, origin);
+    try {
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+          'Accept': 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      const text = await response.text();
+      return json(res, 200, { success: true, text }, origin);
+    } catch (e) {
+      return json(res, 200, { success: false, error: e.message }, origin);
+    }
+  }
+
   return json(res, 404, { error: 'not found' }, origin);
 }
 

@@ -303,6 +303,7 @@ function txRow(t) {
   else if (isIn) subParts.push(t.categoryId && t.categoryId !== FALLBACK_CATEGORY ? 'Доход · ' + cat.name : 'Доход');
   else subParts.push(cat.name);
   if (t.source === 'mono') subParts.push('Monobank');
+  if (t.receiptUrl) subParts.push('🧾 Чек');
   const amountCls = t.internal ? 'internal' : (isIn ? 'positive' : (isTr ? 'transfer' : 'expense'));
   return `
     <div class="row" data-action="edit-tx" data-id="${t.id}">
@@ -608,7 +609,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 27</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 28</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -771,6 +772,20 @@ function runTapTest(btn) {
 
 /* ================= модальные формы ================= */
 
+let activeScannerStream = null;
+let scanAnimTimer = null;
+
+function stopScannerCamera() {
+  if (scanAnimTimer) {
+    clearInterval(scanAnimTimer);
+    scanAnimTimer = null;
+  }
+  if (activeScannerStream) {
+    activeScannerStream.getTracks().forEach((tr) => tr.stop());
+    activeScannerStream = null;
+  }
+}
+
 function openSheet(html) {
   modalRoot.innerHTML = `
     <div class="modal-backdrop" data-action="modal-close">
@@ -782,6 +797,7 @@ function openSheet(html) {
 }
 
 function closeSheet() {
+  stopScannerCamera();
   modalRoot.innerHTML = '';
 }
 
@@ -827,6 +843,30 @@ function altFieldPlaceholder(t) {
   return 'примерно ' + est.toFixed(2);
 }
 
+function captureCurrentTxForm() {
+  const form = document.getElementById('sheet-form');
+  if (!form || form.dataset.form !== 'tx') return null;
+  const id = form.dataset.id || null;
+  const original = id ? state.transactions.find((x) => x.id === id) : null;
+  const catBtn = document.querySelector('#tx-cats .chip.active');
+  const receiptUrlEl = document.getElementById('tx-receipt-url');
+  return {
+    id,
+    type: segValue('#tx-type-seg') || 'expense',
+    amount: document.getElementById('tx-amount') ? document.getElementById('tx-amount').value : '',
+    currency: segValue('#tx-cur-seg') || 'UAH',
+    altAmount: document.getElementById('tx-alt') ? document.getElementById('tx-alt').value : '',
+    altCurrency: original ? original.altCurrency : null,
+    categoryId: catBtn ? catBtn.dataset.cat : (original ? original.categoryId : null),
+    description: document.getElementById('tx-desc') ? document.getElementById('tx-desc').value : '',
+    date: document.getElementById('tx-date') ? document.getElementById('tx-date').value : todayISO(),
+    internal: document.getElementById('tx-internal') ? document.getElementById('tx-internal').checked : false,
+    receiptUrl: receiptUrlEl ? receiptUrlEl.value : (original ? original.receiptUrl : ''),
+    source: original ? original.source : 'manual',
+    sourceId: original ? original.sourceId : null,
+  };
+}
+
 function openTxForm(tx) {
   const isNew = !tx;
   const defaultType = { transfer: 'transfer', income: 'income' }[ui.opsFilter] || 'expense';
@@ -834,12 +874,12 @@ function openTxForm(tx) {
     type: ui.screen === 'ops' ? defaultType : 'expense',
     amount: '', currency: state.settings.baseCurrency,
     categoryId: (ui.screen === 'ops' && ui.opsCategory) ? ui.opsCategory : null,
-    description: '', date: todayISO(),
+    description: '', date: todayISO(), receiptUrl: '',
   };
 
   openSheet(`
     ${sheetHead(isNew ? 'Новая операция' : 'Изменить операцию')}
-    <form id="sheet-form" data-form="tx" data-id="${tx ? tx.id : ''}">
+    <form id="sheet-form" data-form="tx" data-id="${tx ? (tx.id || '') : ''}">
       <div class="field">
         <div class="segmented" id="tx-type-seg">
           ${segButtons([['expense', 'Расход'], ['transfer', 'Перевод'], ['income', 'Доход']], t.type)}
@@ -869,8 +909,17 @@ function openTxForm(tx) {
         </div>
       </div>
       <div class="field">
-        <label>${t.type === 'transfer' ? 'Кому / описание' : 'Описание'}</label>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="margin-bottom:0">${t.type === 'transfer' ? 'Кому / описание' : 'Описание'}</label>
+          <button type="button" class="btn-link-action" data-action="scan-receipt-qr">📷 Чек по QR</button>
+        </div>
         <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: маме на карту' : (t.type === 'income' ? 'например: зарплата' : 'например: кофе с собой')}" value="${esc(t.description)}">
+        <input id="tx-receipt-url" type="hidden" value="${esc(t.receiptUrl || '')}">
+        <div id="tx-receipt-preview" class="receipt-attached-row" ${t.receiptUrl ? '' : 'hidden'}>
+          <span>🧾 Чек прикреплён</span>
+          <a href="${esc(t.receiptUrl || '#')}" id="tx-receipt-link" target="_blank" rel="noopener" class="receipt-link-btn">Открыть оригинал ↗</a>
+          <button type="button" class="receipt-del-btn" data-action="remove-tx-receipt" title="Открепить чек">✕</button>
+        </div>
       </div>
       <div class="field" id="tx-internal-field" ${t.type === 'expense' ? 'hidden' : ''}>
         <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
@@ -897,6 +946,8 @@ function submitTxForm(form) {
   const catBtn = document.querySelector('#tx-cats .chip.active');
   const date = document.getElementById('tx-date').value || todayISO();
   const description = document.getElementById('tx-desc').value.trim();
+  const receiptUrlEl = document.getElementById('tx-receipt-url');
+  const receiptUrl = (receiptUrlEl && receiptUrlEl.value) || null;
 
   const categoryId = type !== 'transfer' ? (catBtn ? catBtn.dataset.cat : FALLBACK_CATEGORY) : null;
   const internalEl = document.getElementById('tx-internal');
@@ -908,14 +959,163 @@ function submitTxForm(form) {
   if (id) {
     const t = state.transactions.find((x) => x.id === id);
     if (!t) return;
-    Object.assign(t, { type, amount, currency, date, description, categoryId, internal, altAmount, altCurrency });
+    Object.assign(t, { type, amount, currency, date, description, categoryId, internal, altAmount, altCurrency, receiptUrl });
   } else {
     state.transactions.push({
       id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
-      internal, altAmount, altCurrency, source: 'manual', sourceId: null,
+      internal, altAmount, altCurrency, receiptUrl, source: 'manual', sourceId: null,
     });
   }
   save(); closeSheet(); render();
+}
+
+/* --- Сканирование и обработка QR-кода чека --- */
+
+function openQrScannerModal() {
+  stopScannerCamera();
+  const hasCamera = typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+
+  openSheet(`
+    ${sheetHead('Сканирование QR чека')}
+    <div class="scanner-modal-body">
+      <div class="scanner-container">
+        <video id="scanner-video" playsinline muted autoplay></video>
+        <div class="scanner-overlay">
+          <div class="scanner-target">
+            <div class="scanner-laser"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scanner-actions">
+        <label class="btn secondary" style="cursor:pointer;margin-top:0;display:block;text-align:center">
+          📁 Выбрать фото чека из галереи
+          <input id="scanner-file" type="file" accept="image/*" style="display:none">
+        </label>
+      </div>
+      <p class="hint" style="text-align:center;margin-top:10px">
+        Наведите камеру на QR-код внизу фискального чека (ДПС, Checkbox, Вчасно и др.)
+      </p>
+    </div>
+  `);
+
+  const video = document.getElementById('scanner-video');
+  const fileInput = document.getElementById('scanner-file');
+
+  if (fileInput) {
+    fileInput.addEventListener('change', async (e) => {
+      if (e.target.files && e.target.files[0]) {
+        toast('Считываем фото чека…');
+        try {
+          const rawText = await qrEngine.decodeFile(e.target.files[0]);
+          if (rawText) {
+            stopScannerCamera();
+            handleScannedReceipt(rawText);
+          } else {
+            toast('QR-код на фото не обнаружен. Сфотографируйте ближе и четче.');
+          }
+        } catch (err) {
+          toast('Не удалось прочитать фото: ' + err.message);
+        }
+        e.target.value = '';
+      }
+    });
+  }
+
+  if (!hasCamera) {
+    toast('Камера недоступна. Выберите фото чека из галереи.');
+    return;
+  }
+
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' } }
+  }).then((stream) => {
+    activeScannerStream = stream;
+    if (video) {
+      video.srcObject = stream;
+      video.setAttribute('playsinline', 'true');
+      video.play().catch(() => {});
+    }
+
+    const checkFrame = async () => {
+      if (!activeScannerStream || !video || video.readyState < 2) return;
+      try {
+        const rawText = await qrEngine.decodeSource(video);
+        if (rawText) {
+          stopScannerCamera();
+          if (navigator.vibrate) navigator.vibrate(50);
+          handleScannedReceipt(rawText);
+          return;
+        }
+      } catch (e) {
+        // продолжаем поиск
+      }
+    };
+
+    scanAnimTimer = setInterval(checkFrame, 200);
+  }).catch((err) => {
+    console.warn('Camera error:', err);
+    toast('Нет доступа к камере. Разрешите доступ или выберите фото.');
+  });
+}
+
+async function handleScannedReceipt(rawText) {
+  const parsed = parseReceiptQr(rawText);
+  if (!parsed) {
+    toast('В этом QR-коде нет данных фискального чека');
+    if (ui.tempTxForm) openTxForm(ui.tempTxForm);
+    return;
+  }
+
+  toast('Загружаем данные чека…');
+  try {
+    const detailed = await fetchReceiptDetails(parsed);
+    openReceiptPreviewModal(detailed);
+  } catch (err) {
+    openReceiptPreviewModal(parsed);
+  }
+}
+
+function openReceiptPreviewModal(receipt) {
+  ui.pendingReceipt = receipt;
+  const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
+  const formattedDesc = formatReceiptDescription(receipt, storeHint);
+  const itemsHtml = receipt.items && receipt.items.length ? `
+    <div class="receipt-items-list">
+      ${receipt.items.map((it) => `
+        <div class="receipt-item-row">
+          <span class="item-name">${esc(it.name)}</span>
+          <span class="item-price">${it.quantity > 1 ? it.quantity + ' × ' : ''}${fmtMoney(it.total, 'UAH')}</span>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
+
+  openSheet(`
+    ${sheetHead('Чек распознан 🎉')}
+    <div class="receipt-preview-card">
+      <div class="rate-line" style="margin-bottom:8px">
+        <div>
+          <div style="font-weight:700;font-size:16px">${esc(receipt.storeName || receipt.typeName || 'Фіскальний чек')}</div>
+          <div class="row-sub">${receipt.id ? 'Чек № ' + esc(receipt.id) : ''}${receipt.fn ? ' · ФН ' + esc(receipt.fn) : ''}</div>
+        </div>
+        ${receipt.amount ? `<div class="big-amount" style="font-size:22px">${fmtMoney(receipt.amount, 'UAH')}</div>` : ''}
+      </div>
+
+      ${receipt.date ? `<div class="row-sub" style="margin-bottom:10px">📅 ${receipt.date}${receipt.time ? ' ' + receipt.time : ''}</div>` : ''}
+
+      ${itemsHtml}
+
+      <div class="field" style="margin-top:12px">
+        <label>Описание для операции</label>
+        <input id="preview-receipt-desc" type="text" value="${esc(formattedDesc)}">
+      </div>
+
+      <button class="btn" data-action="apply-receipt-full">Применить описание и сумму</button>
+      <button class="btn secondary" data-action="apply-receipt-desc-only" style="margin-top:8px">Вставить только описание</button>
+      ${receipt.rawUrl ? `<a href="${esc(receipt.rawUrl)}" target="_blank" rel="noopener" class="btn secondary" style="margin-top:8px;text-align:center;text-decoration:none;display:block">Открыть оригинал на сайте ДПС ↗</a>` : ''}
+    </div>
+  `);
 }
 
 /* --- подписка --- */
@@ -1733,6 +1933,44 @@ document.addEventListener('click', (e) => {
     case 'month-next':
       ui.opsM++; if (ui.opsM > 11) { ui.opsM = 0; ui.opsY++; }
       render(); break;
+
+    case 'scan-receipt-qr':
+      ui.tempTxForm = captureCurrentTxForm();
+      openQrScannerModal();
+      break;
+    case 'remove-tx-receipt': {
+      const urlInput = document.getElementById('tx-receipt-url');
+      if (urlInput) urlInput.value = '';
+      const prev = document.getElementById('tx-receipt-preview');
+      if (prev) prev.hidden = true;
+      break;
+    }
+    case 'apply-receipt-full': {
+      const r = ui.pendingReceipt;
+      if (r && ui.tempTxForm) {
+        const descInput = document.getElementById('preview-receipt-desc');
+        ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r);
+        if (r.amount) ui.tempTxForm.amount = r.amount;
+        if (r.date) ui.tempTxForm.date = r.date;
+        ui.tempTxForm.receiptUrl = r.rawUrl || '';
+        closeSheet();
+        openTxForm(ui.tempTxForm);
+        toast('Данные чека применены ✨');
+      }
+      break;
+    }
+    case 'apply-receipt-desc-only': {
+      const r = ui.pendingReceipt;
+      if (r && ui.tempTxForm) {
+        const descInput = document.getElementById('preview-receipt-desc');
+        ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r);
+        ui.tempTxForm.receiptUrl = r.rawUrl || '';
+        closeSheet();
+        openTxForm(ui.tempTxForm);
+        toast('Описание чека добавлено ✨');
+      }
+      break;
+    }
 
     case 'edit-tx': openTxForm(state.transactions.find((t) => t.id === id)); break;
     case 'edit-sub': openSubForm(state.subscriptions.find((s) => s.id === id)); break;
