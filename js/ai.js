@@ -37,9 +37,38 @@ function buildFinancialContext() {
     });
   }
 
-  // Детализированные операции за последние 60 дней (включая товары из чеков)
+  // Все операции за последние 60 дней с акцентом на описание купленного и товары из чеков
   const cutoff = new Date(Date.now() - 60 * 86400 * 1000).toISOString().slice(0, 10);
-  const recentTxs = state.transactions
+  const expenseTxs = state.transactions
+    .filter((t) => (t.date >= cutoff && (t.type === 'expense' || !t.type)))
+    .sort((a, b) => b.amount - a.amount); // сортируем по убыванию суммы
+
+  const itemizedPurchases = [];
+  for (const t of expenseTxs) {
+    const cat = categoryById(t.categoryId || FALLBACK_CATEGORY).name;
+    if (t.receiptItems && t.receiptItems.length) {
+      for (const it of t.receiptItems) {
+        itemizedPurchases.push({
+          date: t.date,
+          item: it.name,
+          quantity: it.quantity || 1,
+          pricePerUnit: it.price || it.total,
+          totalCost: `${it.total} ${t.currency}`,
+          store: t.description || 'Чек',
+          category: cat
+        });
+      }
+    } else {
+      itemizedPurchases.push({
+        date: t.date,
+        item: t.description || 'Покупка без описания',
+        totalCost: `${t.amount} ${t.currency}`,
+        category: cat
+      });
+    }
+  }
+
+  const allRecentTxs = state.transactions
     .filter((t) => (t.date >= cutoff))
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .slice(0, 150)
@@ -47,9 +76,9 @@ function buildFinancialContext() {
       const cat = t.type === 'transfer' ? 'Перевод' : (categoryById(t.categoryId || FALLBACK_CATEGORY).name);
       let itemStr = '';
       if (t.receiptItems && t.receiptItems.length) {
-        itemStr = ' [Товары из чека: ' + t.receiptItems.map((it) => `${it.name} (${it.quantity > 1 ? it.quantity + 'x ' : ''}${it.total} ${t.currency})`).join(', ') + ']';
+        itemStr = ' [Детализация товаров из чека: ' + t.receiptItems.map((it) => `${it.name}: ${it.total} ${t.currency}`).join(', ') + ']';
       }
-      return `${t.date}: ${t.type === 'expense' ? 'Расход' : (t.type === 'income' ? 'Доход' : 'Перевод')} ${t.amount} ${t.currency} | Категория: ${cat} | Описание: "${t.description || ''}"${itemStr}`;
+      return `Дата: ${t.date} | Тип: ${t.type || 'Расход'} | Сумма: ${t.amount} ${t.currency} | Категория: ${cat} | Описание (купленный товар/услуга): "${t.description || ''}"${itemStr}`;
     });
 
   // Подписки и рассрочки
@@ -72,9 +101,10 @@ function buildFinancialContext() {
     baseCurrency: baseCur,
     usdRate: rateInfo,
     monthlyStats: monthsData,
+    purchasesRankedByCost: itemizedPurchases.slice(0, 80),
+    transactionsList: allRecentTxs,
     subscriptions: subs,
     debts: debts,
-    transactionsSample: recentTxs,
   }, null, 2);
 }
 
@@ -95,18 +125,22 @@ async function askAiAssistant(userMessage, chatHistory = []) {
   const systemMessage = {
     role: 'system',
     content: `Ты — личный финансовый ИИ-аналитик и эксперт по оптимизации расходов в приложении «Трекер трат».
-У тебя есть актуальный доступ к детальным финансовым данным пользователя: транзакциям, категориям, подпискам, долгам и товарам из фискальных чеков (позиции с ценами).
+У тебя есть доступ к финансовым данным пользователя: списку транзакций, категориям, подпискам, долгам и товарам.
 
 ДАННЫЕ ПОЛЬЗОВАТЕЛЯ (JSON):
 ${financialContext}
 
-ИНСТРУКЦИИ:
-1. Отвечай дружелюбно, профессионально, кратко и по существу на том языке, на котором спросил пользователь (русский или украинский).
-2. При анализе товаров из чеков (например, сладости, мясо, молочка, одежда, напитки) внимательно изучай поле [Товары из чека] в транзакциях и делай точные подсчеты.
-3. Выделяй важные суммы, названия магазинов, товаров и процентов жирным шрифтом (например: **350,00 ₴**, **VARUS**, **КітКат**).
-4. Структурируй ответы списками с эмодзи (🛒, 💡, 📊, 💰, 📉).
-5. Если пользователь просит совет по экономии или оптимизации, давай конкретные практические рекомендации на основе его реальных привычек трат.
-6. Не придумывай несуществующие траты — опирайся строго на предоставленные данные.`
+КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
+1. Поле "Описание" (description) или "item" содержит конкретное название товара, услуги или купленных продуктов, указанное пользователем или банком (например: "Пельмени", "Сосиски", "Мясо и куриные продукты", "Пиво и орешки", "Сидр и настойки", "КітКат", "Атб-Маркет").
+2. Сумма операции (amount/totalCost) — это точная стоимость этого товара или набора товаров.
+3. Если пользователь спрашивает "На какой товар я потратил больше всего?", "Какие самые дорогие покупки?", "Сколько ушло на конкретный товар?":
+   - ОБЯЗАТЕЛЬНО проанализируй поле "Описание" (description / item) и суммы (totalCost / amount), а также детализацию чеков.
+   - Составь конкретный ТОП-рейтинг самых дорогих товаров/покупок от большей суммы к меньшей (например: 1. **Мясо и куриные продукты** — **427 ₴**, 2. **Пельмени** — **360,30 ₴**, 3. **Сосиски** — **259 ₴**...).
+   - Если в описании указан один товар (например, "Пельмени 360,30 ₴"), считай всю сумму стоимостью этого товара.
+   - НИКОГДА не говори, что "нельзя определить самый дорогой товар" или "нет цен каждой позиции". Ты ВСЕГДА можешь ранжировать покупки по описаниям и суммам транзакций.
+4. Отвечай дружелюбно, профессионально, кратко и по существу на языке пользователя.
+5. Выделяй важные суммы, названия магазинов, товаров и процентов жирным шрифтом (**360,30 ₴**, **Пельмени**, **VARUS**).
+6. Структурируй ответы красивыми списками с эмодзи (🛒, 🥇, 🥈, 🥉, 💡, 📊, 💰).`
   };
 
   const messages = [
