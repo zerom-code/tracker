@@ -368,7 +368,6 @@ async function route(req, res, url, origin) {
             }, origin);
           }
         }
-      }
       return json(res, 200, { success: false, error: 'Чек не найден в ДПС' }, origin);
     } catch (err) {
       console.error('[receipt] error:', err.message);
