@@ -115,6 +115,18 @@ function parseReceiptQr(raw) {
 }
 
 /**
+ * Форматирует и разделяет слипшиеся слова в названиях позиций чека.
+ * Например: "КуркаСтегноЗЧастиноюСпинки" -> "Курка Стегно З Частиною Спинки"
+ */
+function cleanProductName(name) {
+  if (!name || typeof name !== 'string') return '';
+  let cleaned = name.trim();
+  cleaned = cleaned.replace(/([A-ZА-ЯІЇЄҐ])([A-ZА-ЯІЇЄҐ][a-zа-яіїєґ])/g, '$1 $2');
+  cleaned = cleaned.replace(/([a-zа-яіїєґ0-9])([A-ZА-ЯІЇЄҐ])/g, '$1 $2');
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Разбирает XML фискального чека ДПС (формат DATECS/РРО).
  */
 function parseFiscalXml(xmlString) {
@@ -134,7 +146,7 @@ function parseFiscalXml(xmlString) {
     const smMatch = attrs.match(/SM="([^"]+)"/i);
 
     if (nameMatch) {
-      const name = nameMatch[1].trim();
+      const name = cleanProductName(nameMatch[1]);
       const price = prcMatch ? parseInt(prcMatch[1], 10) / 100 : 0;
       const quantity = qMatch ? parseInt(qMatch[1], 10) / 1000 : 1;
       const total = smMatch ? parseInt(smMatch[1], 10) / 100 : (price * quantity);
@@ -179,19 +191,17 @@ function parseFiscalXml(xmlString) {
 function parseReceiptText(txt) {
   if (!txt || typeof txt !== 'string') return null;
   const items = [];
-  const lines = txt.split(/\r?\n/);
+  const lines = txt.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   let totalSm = null;
   let date = '';
   let time = '';
   let fn = '';
   let id = '';
+  let currentItem = null;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
-    if (artMatch) {
-      items.push({ name: artMatch[1].trim(), price: 0, quantity: 1, total: 0 });
-    }
+    const line = lines[i];
+
     const smMatch = line.match(/(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО)[\s:]+(\d+[.,]\d{2})/i);
     if (smMatch) totalSm = parseFloat(smMatch[1].replace(',', '.'));
 
@@ -204,8 +214,31 @@ function parseReceiptText(txt) {
     if (fnM) fn = fnM[1];
     const idM = line.match(/ЧЕК\s+(?:ФН\s+)?(?:№\s*)?(\d+)/i);
     if (idM) id = idM[1];
+
+    const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
+    if (artMatch) {
+      if (currentItem) items.push(currentItem);
+      currentItem = {
+        name: cleanProductName(artMatch[1]),
+        price: 0,
+        quantity: 1,
+        total: 0,
+      };
+      continue;
+    }
+
+    const calcMatch = line.match(/^(\d+[.,]?\d*)\s*[xх*×]\s*(\d+[.,]?\d*)\s*=\s*(\d+[.,]?\d*)/i);
+    if (calcMatch && currentItem) {
+      currentItem.quantity = parseFloat(calcMatch[1].replace(',', '.'));
+      currentItem.price = parseFloat(calcMatch[2].replace(',', '.'));
+      currentItem.total = parseFloat(calcMatch[3].replace(',', '.'));
+      items.push(currentItem);
+      currentItem = null;
+      continue;
+    }
   }
 
+  if (currentItem) items.push(currentItem);
   if (!items.length) return null;
 
   const detected = typeof detectMerchantInfo === 'function' ? detectMerchantInfo('', fn) : { name: '', category: null };

@@ -203,20 +203,51 @@ async function route(req, res, url, origin) {
           const data = await dpsRes.json();
           if (data && data.check) {
             const decoded = Buffer.from(data.check, 'base64').toString('utf8');
-            const items = [];
-            const lines = decoded.split(/\r?\n/);
-            let storeName = '';
+            function cleanProductName(name) {
+              if (!name || typeof name !== 'string') return '';
+              let cleaned = name.trim();
+              cleaned = cleaned.replace(/([A-ZА-ЯІЇЄҐ])([A-ZА-ЯІЇЄҐ][a-zа-яіїєґ])/g, '$1 $2');
+              cleaned = cleaned.replace(/([a-zа-яіїєґ0-9])([A-ZА-ЯІЇЄҐ])/g, '$1 $2');
+              return cleaned.replace(/\s+/g, ' ').trim();
+            }
 
-            for (const line of lines) {
-              const artMatch = line.trim().match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
-              if (artMatch) {
-                items.push({ name: artMatch[1].trim(), total: 0 });
-              }
-              const storeMatch = line.trim().match(/МАГАЗИН\s+"([^"]+)"|ТОВ\s+"([^"]+)"/i);
+            const items = [];
+            const lines = decoded.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+            let storeName = '';
+            let currentItem = null;
+
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+
+              const storeMatch = line.match(/МАГАЗИН\s+"([^"]+)"|ТОВ\s+"([^"]+)"/i);
               if (storeMatch && !storeName) {
                 storeName = storeMatch[1] || storeMatch[2] || '';
               }
+
+              const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
+              if (artMatch) {
+                if (currentItem) items.push(currentItem);
+                currentItem = {
+                  name: cleanProductName(artMatch[1]),
+                  quantity: 1,
+                  price: 0,
+                  total: 0,
+                };
+                continue;
+              }
+
+              const calcMatch = line.match(/^(\d+[.,]?\d*)\s*[xх*×]\s*(\d+[.,]?\d*)\s*=\s*(\d+[.,]?\d*)/i);
+              if (calcMatch && currentItem) {
+                currentItem.quantity = parseFloat(calcMatch[1].replace(',', '.'));
+                currentItem.price = parseFloat(calcMatch[2].replace(',', '.'));
+                currentItem.total = parseFloat(calcMatch[3].replace(',', '.'));
+                items.push(currentItem);
+                currentItem = null;
+                continue;
+              }
             }
+
+            if (currentItem) items.push(currentItem);
 
             return json(res, 200, {
               success: true,
