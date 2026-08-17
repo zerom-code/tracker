@@ -689,6 +689,15 @@ input[type="checkbox"]:checked::after {
   opacity: 0.75;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.receipt-attached-row[hidden],
+.receipt-attached-row.hidden {
+  display: none !important;
+}
+
 .receipt-attached-row {
   display: flex;
   align-items: center;

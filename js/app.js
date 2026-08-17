@@ -609,7 +609,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 28</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 29</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -915,9 +915,9 @@ function openTxForm(tx) {
         </div>
         <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: маме на карту' : (t.type === 'income' ? 'например: зарплата' : 'например: кофе с собой')}" value="${esc(t.description)}">
         <input id="tx-receipt-url" type="hidden" value="${esc(t.receiptUrl || '')}">
-        <div id="tx-receipt-preview" class="receipt-attached-row" ${t.receiptUrl ? '' : 'hidden'}>
+        <div id="tx-receipt-preview" class="receipt-attached-row" style="${t.receiptUrl ? '' : 'display:none'}">
           <span>🧾 Чек прикреплён</span>
-          <a href="${esc(t.receiptUrl || '#')}" id="tx-receipt-link" target="_blank" rel="noopener" class="receipt-link-btn">Открыть оригинал ↗</a>
+          <a href="${esc(t.receiptUrl || '')}" id="tx-receipt-link" target="_blank" rel="noopener" class="receipt-link-btn" ${t.receiptUrl ? '' : 'style="display:none"'}>Открыть оригинал ↗</a>
           <button type="button" class="receipt-del-btn" data-action="remove-tx-receipt" title="Открепить чек">✕</button>
         </div>
       </div>
@@ -1028,17 +1028,23 @@ function openQrScannerModal() {
   }
 
   navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: 'environment' } }
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
   }).then((stream) => {
     activeScannerStream = stream;
     if (video) {
       video.srcObject = stream;
       video.setAttribute('playsinline', 'true');
+      video.setAttribute('webkit-playsinline', 'true');
+      video.onloadedmetadata = () => {
+        video.play().catch(() => {});
+      };
       video.play().catch(() => {});
     }
 
+    let isScanning = false;
     const checkFrame = async () => {
-      if (!activeScannerStream || !video || video.readyState < 2) return;
+      if (isScanning || !activeScannerStream || !video || video.readyState < 2 || !video.videoWidth) return;
+      isScanning = true;
       try {
         const rawText = await qrEngine.decodeSource(video);
         if (rawText) {
@@ -1049,10 +1055,12 @@ function openQrScannerModal() {
         }
       } catch (e) {
         // продолжаем поиск
+      } finally {
+        isScanning = false;
       }
     };
 
-    scanAnimTimer = setInterval(checkFrame, 200);
+    scanAnimTimer = setInterval(checkFrame, 180);
   }).catch((err) => {
     console.warn('Camera error:', err);
     toast('Нет доступа к камере. Разрешите доступ или выберите фото.');
@@ -1942,7 +1950,17 @@ document.addEventListener('click', (e) => {
       const urlInput = document.getElementById('tx-receipt-url');
       if (urlInput) urlInput.value = '';
       const prev = document.getElementById('tx-receipt-preview');
-      if (prev) prev.hidden = true;
+      if (prev) {
+        prev.style.display = 'none';
+        prev.hidden = true;
+      }
+      const link = document.getElementById('tx-receipt-link');
+      if (link) {
+        link.href = '';
+        link.style.display = 'none';
+      }
+      if (ui.tempTxForm) ui.tempTxForm.receiptUrl = '';
+      toast('Чек откреплён');
       break;
     }
     case 'apply-receipt-full': {
