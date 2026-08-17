@@ -54,6 +54,16 @@ function defaultState() {
   };
 }
 
+function migrateTransactions(txs) {
+  if (!Array.isArray(txs)) return [];
+  return txs.map((t) => {
+    if (t.type === 'transfer' && !t.internal && /погашен|розстрочк|рассрочк|частинами|кредит/i.test(t.description || '')) {
+      return { ...t, type: 'expense', categoryId: 'credit' };
+    }
+    return t;
+  });
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -68,7 +78,7 @@ function load() {
       mono: { ...base.mono, ...(data.mono || {}) },
       sync: { ...base.sync, ...(data.sync || {}) },
       categories: mergeCategories(data.categories, base.categories),
-      transactions: data.transactions || [],
+      transactions: migrateTransactions(data.transactions || []),
       subscriptions: (data.subscriptions || []).map(normalizeSub),
       debts: (data.debts || []).map(normalizeDebt),
       monoDeleted: data.monoDeleted || [],

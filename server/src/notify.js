@@ -17,8 +17,13 @@ export function fmtAmount(minor, currencyCode) {
   return `${sign}${text}${symbol ? ' ' + symbol : ''}`;
 }
 
+export function isCreditPayment(desc) {
+  return /погашен|розстрочк|рассрочк|частинами|кредит/i.test(String(desc || ''));
+}
+
 export function opKind(op) {
   if (op.amount > 0) return 'income';
+  if (isCreditPayment(op.description)) return 'expense';
   return TRANSFER_MCC.includes(op.mcc) ? 'transfer' : 'expense';
 }
 

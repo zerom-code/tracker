@@ -123,9 +123,15 @@ function monoAltOf(item, accountCurrency) {
   return { amount: Math.abs(item.operationAmount) / 100, currency: altCurrency };
 }
 
+function isCreditPayment(desc) {
+  return /погашен|розстрочк|рассрочк|частинами|кредит/i.test(String(desc || ''));
+}
+
 function mapMonoItem(item, currency, accountId) {
   const isIncome = item.amount > 0;
-  const isTransfer = !isIncome && TRANSFER_MCC.includes(item.mcc);
+  const desc = (item.description || '').replace(/\n/g, ' · ');
+  const isCredit = !isIncome && isCreditPayment(desc);
+  const isTransfer = !isIncome && !isCredit && TRANSFER_MCC.includes(item.mcc);
   const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
   const when = new Date((item.time || Math.floor(Date.now() / 1000)) * 1000);
   const alt = monoAltOf(item, currency);
@@ -138,8 +144,8 @@ function mapMonoItem(item, currency, accountId) {
     type,
     amount: Math.abs(item.amount) / 100,
     currency,
-    categoryId: type === 'transfer' ? null : (isIncome ? FALLBACK_CATEGORY : categoryForMcc(item.mcc)),
-    description: (item.description || '').replace(/\n/g, ' · '),
+    categoryId: isCredit ? 'credit' : (type === 'transfer' ? null : (isIncome ? FALLBACK_CATEGORY : categoryForMcc(item.mcc))),
+    description: desc,
     date: toISO(when),
     source: 'mono',
     sourceId: item.id,
