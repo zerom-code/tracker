@@ -168,6 +168,18 @@ async function fetchReceiptDetails(receipt) {
   return receipt;
 }
 
+const KNOWN_FN_PATTERNS = [
+  { pattern: /^300079|^300080|^300081|^300082/i, name: 'VARUS', category: 'products' }, // ТОВ "ОМЕГА" / VARUS
+  { pattern: /^300122|^300022|^300123|^300023|^300124/i, name: 'АТБ', category: 'products' }, // ТОВ "АТБ-Маркет"
+  { pattern: /^300055|^300056|^300057|^300058/i, name: 'Сільпо', category: 'products' }, // ТОВ "Сільпо-Фуд"
+  { pattern: /^300071|^300072/i, name: 'Фора', category: 'products' },
+  { pattern: /^300061|^300062/i, name: 'Novus', category: 'products' },
+  { pattern: /^300091|^300092/i, name: 'Епіцентр', category: 'home' },
+  { pattern: /^300045|^300046/i, name: 'EVA', category: 'health' },
+  { pattern: /^300031|^300032/i, name: 'WOG', category: 'car' },
+  { pattern: /^300035|^300036/i, name: 'OKKO', category: 'car' },
+];
+
 const KNOWN_MERCHANTS = [
   { keywords: [/varus|варус/i, /омега/i], name: 'VARUS', category: 'products' },
   { keywords: [/атб|atb/i], name: 'АТБ', category: 'products' },
@@ -190,19 +202,36 @@ const KNOWN_MERCHANTS = [
 ];
 
 /**
- * Определяет название магазина и категорию по тексту (из Monobank или чека).
+ * Определяет название магазина и категорию по тексту описания или фискальному номеру (ФН).
  */
-function detectMerchantInfo(hint) {
-  if (!hint || typeof hint !== 'string') return { name: '', category: null };
-  const text = hint.trim();
-  for (const m of KNOWN_MERCHANTS) {
-    for (const kw of m.keywords) {
-      if (kw.test(text)) {
-        return { name: m.name, category: m.category };
+function detectMerchantInfo(hint, fn = '') {
+  // 1. По фискальному номеру РРО/ПРРО
+  if (fn) {
+    const cleanFn = String(fn).trim();
+    for (const item of KNOWN_FN_PATTERNS) {
+      if (item.pattern.test(cleanFn)) {
+        return { name: item.name, category: item.category };
       }
     }
   }
-  return { name: text.slice(0, 30), category: null };
+
+  // 2. По тексту подсказки / существующего описания
+  if (hint && typeof hint === 'string') {
+    const text = hint.trim();
+    for (const m of KNOWN_MERCHANTS) {
+      for (const kw of m.keywords) {
+        if (kw.test(text)) {
+          return { name: m.name, category: m.category };
+        }
+      }
+    }
+    if (text && text !== 'Чек по QR' && !text.startsWith('Чек №')) {
+      return { name: text.slice(0, 30), category: 'products' };
+    }
+  }
+
+  // По умолчанию фискальные чеки из магазинов — это продукты
+  return { name: '', category: 'products' };
 }
 
 /**
@@ -211,7 +240,7 @@ function detectMerchantInfo(hint) {
 function formatReceiptDescription(receipt, storeHint = '') {
   if (!receipt) return '';
 
-  const detected = detectMerchantInfo(receipt.storeName || storeHint || '');
+  const detected = detectMerchantInfo(receipt.storeName || storeHint || '', receipt.fn);
   const store = detected.name || receipt.storeName || storeHint || '';
 
   // Если есть список распознанных товаров

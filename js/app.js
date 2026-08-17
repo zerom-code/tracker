@@ -609,7 +609,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 30</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 31</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1087,7 +1087,7 @@ async function handleScannedReceipt(rawText) {
 function openReceiptPreviewModal(receipt) {
   ui.pendingReceipt = receipt;
   const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
-  const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(receipt.storeName || storeHint) : { name: '', category: null };
+  const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(receipt.storeName || storeHint, receipt.fn) : { name: '', category: null };
   const storeName = merchant.name || receipt.storeName || receipt.typeName || 'Фіскальний чек';
   const formattedDesc = formatReceiptDescription(receipt, storeHint);
   const matchedCat = merchant.category ? categoryById(merchant.category) : null;
@@ -1108,7 +1108,7 @@ function openReceiptPreviewModal(receipt) {
     <div class="receipt-preview-card">
       <div class="rate-line" style="margin-bottom:8px">
         <div>
-          <div style="font-weight:700;font-size:17px;color:var(--text)">${esc(storeName)}</div>
+          <div style="font-weight:700;font-size:18px;color:var(--text)">${esc(storeName)}</div>
           <div class="row-sub">${receipt.id ? 'Чек № ' + esc(receipt.id) : ''}${receipt.fn ? ' · ФН ' + esc(receipt.fn) : ''}</div>
         </div>
         ${receipt.amount ? `<div class="big-amount" style="font-size:22px">${fmtMoney(receipt.amount, 'UAH')}</div>` : ''}
@@ -1119,9 +1119,18 @@ function openReceiptPreviewModal(receipt) {
         ${matchedCat ? `<span class="chip" style="font-size:12px;padding:4px 8px">${matchedCat.emoji} ${esc(matchedCat.name)}</span>` : ''}
       </div>
 
+      <div class="field" style="margin-bottom:10px">
+        <label>Магазин / сеть</label>
+        <div class="chips" id="preview-store-chips" style="gap:6px">
+          ${['VARUS', 'АТБ', 'Сільпо', 'Novus', 'Фора', 'Епіцентр', 'EVA', 'Аптека'].map((name) => `
+            <button type="button" class="chip preview-store-chip ${storeName === name ? 'active' : ''}" data-store-name="${name}">${name}</button>
+          `).join('')}
+        </div>
+      </div>
+
       ${itemsHtml}
 
-      <div class="field" style="margin-top:12px">
+      <div class="field" style="margin-top:10px">
         <label>Описание для операции</label>
         <input id="preview-receipt-desc" type="text" value="${esc(formattedDesc)}">
         <p class="hint">Можете дополнить покупками (например: ${esc(storeName)} (Салфетки, курица))</p>
@@ -1905,6 +1914,23 @@ document.addEventListener('click', (e) => {
   const chip = e.target.closest('.tx-cat');
   if (chip) {
     document.querySelectorAll('#tx-cats .chip').forEach((b) => b.classList.toggle('active', b === chip));
+    return;
+  }
+
+  // чипсы выбора магазина в предпросмотре чека
+  const storeChip = e.target.closest('.preview-store-chip');
+  if (storeChip) {
+    document.querySelectorAll('.preview-store-chip').forEach((b) => b.classList.toggle('active', b === storeChip));
+    const newStore = storeChip.dataset.storeName;
+    const descInput = document.getElementById('preview-receipt-desc');
+    const r = ui.pendingReceipt;
+    if (r) {
+      r.storeName = newStore;
+      const checkNum = String(r.id || '').replace(/^0+/, '') || r.id;
+      if (descInput) {
+        descInput.value = checkNum ? `${newStore} (Чек № ${checkNum})` : newStore;
+      }
+    }
     return;
   }
 
