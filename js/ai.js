@@ -47,127 +47,56 @@ function buildFinancialContext() {
     });
   }
 
-  // Все операции за последние 60 дней со строгим разделением магазина и купленных товаров
-  const cutoff = new Date(Date.now() - 60 * 86400 * 1000).toISOString().slice(0, 10);
-  const expenseTxs = state.transactions
-    .filter((t) => (t.date >= cutoff && (t.type === 'expense' || !t.type)))
+  // Все операции за последние 90 дней со строгим разделением магазина и купленных товаров
+  const cutoff = new Date(Date.now() - 90 * 86400 * 1000).toISOString().slice(0, 10);
+  const recentTxs = state.transactions
+    .filter((t) => (t.date >= cutoff))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
-  const detailedPurchases = expenseTxs.map((t) => {
+  const allTransactions = recentTxs.map((t) => {
     const { store, products } = extractStoreAndProducts(t.description);
-    const cat = categoryById(t.categoryId || FALLBACK_CATEGORY).name;
-    const items = (t.receiptItems && t.receiptItems.length)
-      ? t.receiptItems.map((it) => `${it.name} (${it.total} ${t.currency})`).join(', ')
-      : '';
+    const cat = t.type === 'transfer' ? 'Перевод' : (categoryById(t.categoryId || FALLBACK_CATEGORY).name);
+    const hasItems = !!(t.receiptItems && t.receiptItems.length);
+    const items = hasItems
+      ? t.receiptItems.map((it) => ({
+          name: it.name,
+          quantity: it.quantity || 1,
+          pricePerUnit: `${it.price || it.total} ${t.currency}`,
+          total: `${it.total} ${t.currency}`
+        }))
+      : [];
+
     return {
       date: t.date,
+      type: t.type || 'expense',
       store: store,
-      purchasedProducts: products,
+      description: products,
       amount: `${t.amount} ${t.currency}`,
       category: cat,
-      itemizedReceipt: items || 'нет детализации позиций',
+      hasFiscalReceipt: hasItems,
+      receiptPositions: items,
     };
   });
 
-  // Автоматическая группировка продуктов по ключевым словам со строгим разделением точных цен и смешанных чеков
-  const productKeywordMap = {};
-  const keywordsList = [
-    { key: 'Батончики KitKat', match: /kit\s*kat|кіт\s*кат/i },
-    { key: 'Шоколад и сладости', match: /шоколад|конфет|цукерк|печень|торт|вафл/i },
-    { key: 'Пиво', match: /пив[оаеи]/i },
-    { key: 'Сидр', match: /сидр/i },
-    { key: 'Настойки и крепкий алкоголь', match: /настойк|водк|виски|ром|джин|коньяк/i },
-    { key: 'Вино', match: /вин[оа]/i },
-    { key: 'Мясо и птица', match: /мяс|куриц|курк|говяд|свин|фарш|печень|стегн/i },
-    { key: 'Пельмени и полуфабрикаты', match: /пельмен|вареник|лазань/i },
-    { key: 'Сосиски и колбасы', match: /сосиск|колбас|ковбас|сард/i },
-    { key: 'Чипсы и сухарики', match: /чипс|сухарик/i },
-    { key: 'Орешки', match: /орешк|горіх/i },
-    { key: 'Квас и безалкогольные напитки', match: /квас|pepsi|пепси|кола|cola|сок|энергетик|енергетик/i },
-    { key: 'Сыр и молочные продукты', match: /сыр|сир|молок|сметан|творог|йогурт/i },
-  ];
-
-  for (const t of expenseTxs) {
-    const { store, products } = extractStoreAndProducts(t.description);
-    
-    for (const kw of keywordsList) {
-      let matchedInItems = false;
-      let exactItemSum = 0;
-      const matchedItemNames = [];
-
-      if (t.receiptItems && t.receiptItems.length) {
-        for (const it of t.receiptItems) {
-          if (kw.match.test(it.name)) {
-            matchedInItems = true;
-            exactItemSum += (it.total || 0);
-            matchedItemNames.push(`${it.name}: ${it.total} ${t.currency}`);
-          }
-        }
-      }
-
-      const matchedInDesc = kw.match.test(t.description || '');
-
-      if (matchedInItems || matchedInDesc) {
-        if (!productKeywordMap[kw.key]) {
-          productKeywordMap[kw.key] = {
-            exactConfirmedSpent: 0,
-            currency: t.currency,
-            exactPurchases: [],
-            mixedChecks: [],
-          };
-        }
-
-        if (matchedInItems) {
-          productKeywordMap[kw.key].exactConfirmedSpent += exactItemSum;
-          productKeywordMap[kw.key].exactPurchases.push({
-            date: t.date,
-            store: store,
-            exactCost: `${exactItemSum.toFixed(2)} ${t.currency}`,
-            items: matchedItemNames.join(', '),
-          });
-        } else {
-          // Если в описании только этот продукт или смешанный чек
-          const isMixed = /[,+]| и | з | с /i.test(products);
-          if (!isMixed) {
-            productKeywordMap[kw.key].exactConfirmedSpent += t.amount;
-            productKeywordMap[kw.key].exactPurchases.push({
-              date: t.date,
-              store: store,
-              exactCost: `${t.amount} ${t.currency}`,
-              description: products,
-            });
-          } else {
-            productKeywordMap[kw.key].mixedChecks.push({
-              date: t.date,
-              store: store,
-              totalCheckAmount: `${t.amount} ${t.currency}`,
-              checkDescription: products,
-              note: 'В чеке было несколько товаров, цена конкретно этого товара отдельно не выделена',
-            });
-          }
-        }
+  // Все отдельные позиции из всех прикреплённых фискальных чеков
+  const allFiscalReceiptItems = [];
+  for (const t of recentTxs) {
+    if (t.receiptItems && t.receiptItems.length) {
+      const { store } = extractStoreAndProducts(t.description);
+      const cat = categoryById(t.categoryId || FALLBACK_CATEGORY).name;
+      for (const it of t.receiptItems) {
+        allFiscalReceiptItems.push({
+          date: t.date,
+          store: store,
+          productName: it.name,
+          quantity: it.quantity || 1,
+          unitPrice: `${it.price || it.total} ${t.currency}`,
+          totalCost: `${it.total} ${t.currency}`,
+          category: cat,
+        });
       }
     }
   }
-
-  const groupedProductsRanking = Object.entries(productKeywordMap)
-    .map(([name, data]) => ({
-      productGroup: name,
-      exactConfirmedSum: `${data.exactConfirmedSpent.toFixed(2)} ${data.currency || baseCur}`,
-      exactPurchasesList: data.exactPurchases,
-      mixedChecksList: data.mixedChecks,
-    }))
-    .sort((a, b) => parseFloat(b.exactConfirmedSum) - parseFloat(a.exactConfirmedSum));
-
-  const allRecentTxs = state.transactions
-    .filter((t) => (t.date >= cutoff))
-    .sort((a, b) => (a.date < b.date ? 1 : -1))
-    .slice(0, 150)
-    .map((t) => {
-      const { store, products } = extractStoreAndProducts(t.description);
-      const cat = t.type === 'transfer' ? 'Перевод' : (categoryById(t.categoryId || FALLBACK_CATEGORY).name);
-      return `Дата: ${t.date} | Магазин: "${store}" | Куплено: "${products}" | Сумма: ${t.amount} ${t.currency} | Категория: ${cat}`;
-    });
 
   // Подписки и рассрочки
   const subs = state.subscriptions.filter((s) => s.active !== false).map((s) => {
@@ -188,9 +117,9 @@ function buildFinancialContext() {
     currentDate: today,
     baseCurrency: baseCur,
     usdRate: rateInfo,
-    monthlyStats: monthsData,
-    aggregatedProductGroups: groupedProductsRanking,
-    detailedPurchasesList: detailedPurchases,
+    monthlyOverview: monthsData,
+    allFiscalReceiptItems: allFiscalReceiptItems,
+    allTransactions: allTransactions,
     subscriptions: subs,
     debts: debts,
   }, null, 2);
@@ -212,28 +141,37 @@ async function askAiAssistant(userMessage, chatHistory = []) {
 
   const systemMessage = {
     role: 'system',
-    content: `Ты — личный финансовый ИИ-аналитик и эксперт по оптимизации расходов в приложении «Трекер трат».
-У тебя есть доступ к актуальным финансовым данным пользователя: списку транзакций, категориям, подпискам, долгам и товарам.
+    content: `Ты — личный финансовый ИИ-аналитик в приложении «Трекер трат».
+У тебя есть доступ ко всем актуальным финансовым данным пользователя: списку всех транзакций ("allTransactions"), отдельным позициям из фискальных чеков ("allFiscalReceiptItems"), категориям, подпискам и долгам.
 
 ДАННЫЕ ПОЛЬЗОВАТЕЛЯ (JSON):
 ${financialContext}
 
-КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА ТОЧНОСТИ:
-1. СТРОГОСТЬ БРЕНДОВ И НАЗВАНИЙ:
-   - Если пользователь спрашивает про конкретный товар/бренд (например, «KitKat»):
-     * Ищи ТОЛЬКО точные упоминания этого бренда (KitKat / КітКат).
-     * НЕ включай общие слова «шоколадка x2», «торт» или «конфеты», если там не указан именно этот бренд.
+УНИВЕРСАЛЬНЫЕ ПРАВИЛА ФИНАНСОВОГО АНАЛИЗА (БЕЗ ХАРДКОДА — ДЛЯ ЛЮБОГО ТОВАРА И ВОПРОСА):
+
+1. ТОЧНОСТЬ ТОВАРОВ И БРЕНДОВ:
+   - Когда пользователь спрашивает про ЛЮБОЙ конкретный товар, продукт или бренд (например: KitKat, Пельмени, Пиво, Сыр, Кофе, Мясо, Молоко, Pepsi, Чипсы, Сосиски и т.д.):
+     * Ищи ТОЛЬКО точные совпадения и упоминания именно этого товара/бренда в названиях позиций чеков (allFiscalReceiptItems / receiptPositions) и в описании (description).
+     * НЕ приписывай к конкретному бренду или товару другие товары похожей категории (например, если спросили про «KitKat», учитывай только KitKat, а не «шоколадка», «печенье» или «торт», если в них нет KitKat).
+
 2. ТОЧНЫЕ ЦЕНЫ ИЗ ЧЕКОВ VS ОБЩИЕ ЧЕКИ:
-   - Если есть чек с детальными позициями ("exactPurchasesList"): назови ТОЧНУЮ подтверждённую сумму и стоимость каждого товара (например: **KitKat белый 42 г — 31,30 ₴**, **KitKat Nestlé 42 г — 31,90 ₴**, **KitKat Nestlé 40 г — 29,50 ₴**, всего за 3 шт = **92,70 ₴**).
-   - Если товар упомянут в составе общего чека ("mixedChecksList", например «квас и KitKat» на сумму 1,75 $):
-     * ЧЁТКО поясни, что 1,75 $ — это сумма ВСЕГО чека с квасом, а точная цена батончика отдельно не выделена.
-     * НИКОГДА не прибавляй сумму всего смешанного чека (на 700 грн или 16 $) к стоимости одного товара!
-3. ТОЧНОСТЬ МАГАЗИНОВ:
-   - Магазин указан в поле "store" (ALKOMARKET, АТБ, VARUS). Всегда строго пиши правильный магазин.
-4. ФОРМАТИРОВАНИЕ:
-   - Выделяй жирным шрифтом названия продуктов, магазинов и точные суммы (**31,30 ₴**, **92,70 ₴**, **VARUS**).
-   - Используй понятные списки с эмодзи (🍫, 🍺, 🛒, 🥇, 💡, 📊).
-   - Отвечай дружелюбно, профессионально, честно и без выдумок.`
+   - Если позиция есть в фискальном чеке (allFiscalReceiptItems / receiptPositions) или в чеке на один товар: назови её ТОЧНУЮ стоимость из чека (например: **31,30 ₴**).
+   - Если товар упомянут в составе общего смешанного чека без построчной детализации (например: «квас и KitKat» на 1,75 $ или «пиво, чипсы и хлеб» на 250 ₴):
+     * ЧЁТКО укажи, что сумма (1,75 $ или 250 ₴) — это стоимость ВСЕГО чека с другими продуктами, а цена конкретного товара в нём отдельно не выделена.
+     * НИКОГДА не складывай общую сумму смешанного чека с другими покупками как будто это цена одного товара!
+     * Подведи понятный итог: «Точно подтвержденная сумма по детальным чекам — X ₴. Также товар встречался в N общих чеках на сумму Y».
+
+3. ОТВЕТ НА ВОПРОС «НА КАКОЙ ПРОДУКТ Я ПОТРАТИЛ БОЛЬШЕ ВСЕГО?»:
+   - Проанализируй ВСЕ операции и позиции из чеков.
+   - Сгруппируй однотипные продукты (например, все покупки пива, все покупки мяса, все покупки сладостей, полуфабрикатов и т.д.) динамически по их реальным названиям и смыслу.
+   - Найди самый затратный и частый продукт, приведи список операций с правильными магазинами и суммами и подведи понятный итог.
+
+4. ТОЧНОСТЬ МАГАЗИНОВ:
+   - Всегда бери название магазина строго из поля "store" (ALKOMARKET — это ALKOMARKET, VARUS — это VARUS, АТБ — это АТБ). Никогда не путай магазины между собой.
+
+5. ФОРМАТИРОВАНИЕ:
+   - Выделяй жирным шрифтом названия товаров, магазинов и точные суммы (**31,30 ₴**, **VARUS**, **92,70 ₴**).
+   - Используй аккуратные списки и эмодзи (🍫, 🍺, 🛒, 🥇, 💡, 📊). Отвечай кратко, честно и по делу.`
   };
 
   const messages = [
