@@ -115,17 +115,19 @@ ${financialContext}
     { role: 'user', content: userMessage }
   ];
 
+  const requestBody = {
+    model: model,
+    messages: messages,
+    max_completion_tokens: 2500,
+  };
+
   const res = await fetch(baseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: model,
-      messages: messages,
-      temperature: 0.5,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) {
@@ -173,7 +175,7 @@ async function testAiConnection(apiKey, model, baseUrl) {
     body: JSON.stringify({
       model: m,
       messages: [{ role: 'user', content: 'Привет! Ответь одним словом "Готово".' }],
-      max_tokens: 10,
+      max_completion_tokens: 50,
     }),
   });
 
