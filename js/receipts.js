@@ -168,32 +168,66 @@ async function fetchReceiptDetails(receipt) {
   return receipt;
 }
 
+const KNOWN_MERCHANTS = [
+  { keywords: [/varus|варус/i, /омега/i], name: 'VARUS', category: 'products' },
+  { keywords: [/атб|atb/i], name: 'АТБ', category: 'products' },
+  { keywords: [/сільпо|сильпо|silpo/i, /фоззі|fozzy/i], name: 'Сільпо', category: 'products' },
+  { keywords: [/фора|fora/i], name: 'Фора', category: 'products' },
+  { keywords: [/novus|новус/i], name: 'Novus', category: 'products' },
+  { keywords: [/ашан|auchan/i], name: 'Ашан', category: 'products' },
+  { keywords: [/metro|метро/i], name: 'METRO', category: 'products' },
+  { keywords: [/епіцентр|эпицентр|epicentr/i], name: 'Епіцентр', category: 'home' },
+  { keywords: [/eva|єва/i, /prostor|простор/i], name: 'EVA', category: 'health' },
+  { keywords: [/wog|вого/i], name: 'WOG', category: 'car' },
+  { keywords: [/okko|окко/i], name: 'OKKO', category: 'car' },
+  { keywords: [/socar|сокар/i], name: 'SOCAR', category: 'car' },
+  { keywords: [/upg|упг/i], name: 'UPG', category: 'car' },
+  { keywords: [/аптека|анц|бажаємо здоров|подорожник|віталюкс|911|фарм/i], name: 'Аптека', category: 'health' },
+  { keywords: [/mcdonald|макдоналд|кфс|kfc/i], name: 'McDonald’s', category: 'cafe' },
+  { keywords: [/rozetka|розетка/i], name: 'Rozetka', category: 'other' },
+  { keywords: [/нова пошта|новапошта|nova poshta/i], name: 'Нова Пошта', category: 'connection' },
+  { keywords: [/sinsay|синсей|zara|h&m|lc waikiki|reserved/i], name: 'Одяг', category: 'clothes' },
+];
+
+/**
+ * Определяет название магазина и категорию по тексту (из Monobank или чека).
+ */
+function detectMerchantInfo(hint) {
+  if (!hint || typeof hint !== 'string') return { name: '', category: null };
+  const text = hint.trim();
+  for (const m of KNOWN_MERCHANTS) {
+    for (const kw of m.keywords) {
+      if (kw.test(text)) {
+        return { name: m.name, category: m.category };
+      }
+    }
+  }
+  return { name: text.slice(0, 30), category: null };
+}
+
 /**
  * Формирует читаемый текст описания для операции из данных чека.
  */
 function formatReceiptDescription(receipt, storeHint = '') {
   if (!receipt) return '';
 
-  const store = receipt.storeName || storeHint || '';
-  const prefix = store ? `${store}: ` : '';
+  const detected = detectMerchantInfo(receipt.storeName || storeHint || '');
+  const store = detected.name || receipt.storeName || storeHint || '';
 
   // Если есть список распознанных товаров
   if (receipt.items && receipt.items.length > 0) {
     const itemNames = receipt.items.map((it) => it.name.trim()).filter(Boolean);
-    // Берем первые 5-7 товаров для емкого описания
     const maxItems = 6;
     const shown = itemNames.slice(0, maxItems).join(', ');
-    const more = itemNames.length > maxItems ? ` ... (ще ${itemNames.length - maxItems})` : '';
-    return `${prefix}${shown}${more}`;
+    const more = itemNames.length > maxItems ? ` (ще ${itemNames.length - maxItems})` : '';
+    return store ? `${store} (${shown}${more})` : `${shown}${more}`;
   }
 
-  // Если есть фискальный номер и номер чека
-  if (receipt.id && receipt.fn) {
-    return `${prefix}Чек № ${receipt.id} (ФН ${receipt.fn})`;
-  }
+  // Если есть номер чека
   if (receipt.id) {
-    return `${prefix}Чек № ${receipt.id}`;
+    const checkNum = String(receipt.id).replace(/^0+/, '') || receipt.id;
+    return store ? `${store} (Чек № ${checkNum})` : `Чек № ${checkNum}`;
   }
 
-  return store ? `${store} (Чек за ${receipt.date || 'сьогодні'})` : 'Покупка по чеку';
+  return store ? `${store}` : 'Чек по QR';
 }

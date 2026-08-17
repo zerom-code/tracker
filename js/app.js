@@ -609,7 +609,7 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 29</p>
+    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 30</p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1087,7 +1087,11 @@ async function handleScannedReceipt(rawText) {
 function openReceiptPreviewModal(receipt) {
   ui.pendingReceipt = receipt;
   const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
+  const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(receipt.storeName || storeHint) : { name: '', category: null };
+  const storeName = merchant.name || receipt.storeName || receipt.typeName || 'Фіскальний чек';
   const formattedDesc = formatReceiptDescription(receipt, storeHint);
+  const matchedCat = merchant.category ? categoryById(merchant.category) : null;
+
   const itemsHtml = receipt.items && receipt.items.length ? `
     <div class="receipt-items-list">
       ${receipt.items.map((it) => `
@@ -1104,22 +1108,26 @@ function openReceiptPreviewModal(receipt) {
     <div class="receipt-preview-card">
       <div class="rate-line" style="margin-bottom:8px">
         <div>
-          <div style="font-weight:700;font-size:16px">${esc(receipt.storeName || receipt.typeName || 'Фіскальний чек')}</div>
+          <div style="font-weight:700;font-size:17px;color:var(--text)">${esc(storeName)}</div>
           <div class="row-sub">${receipt.id ? 'Чек № ' + esc(receipt.id) : ''}${receipt.fn ? ' · ФН ' + esc(receipt.fn) : ''}</div>
         </div>
         ${receipt.amount ? `<div class="big-amount" style="font-size:22px">${fmtMoney(receipt.amount, 'UAH')}</div>` : ''}
       </div>
 
-      ${receipt.date ? `<div class="row-sub" style="margin-bottom:10px">📅 ${receipt.date}${receipt.time ? ' ' + receipt.time : ''}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        ${receipt.date ? `<span class="chip active" style="font-size:12px;padding:4px 8px">📅 ${receipt.date}${receipt.time ? ' ' + receipt.time : ''}</span>` : ''}
+        ${matchedCat ? `<span class="chip" style="font-size:12px;padding:4px 8px">${matchedCat.emoji} ${esc(matchedCat.name)}</span>` : ''}
+      </div>
 
       ${itemsHtml}
 
       <div class="field" style="margin-top:12px">
         <label>Описание для операции</label>
         <input id="preview-receipt-desc" type="text" value="${esc(formattedDesc)}">
+        <p class="hint">Можете дополнить покупками (например: ${esc(storeName)} (Салфетки, курица))</p>
       </div>
 
-      <button class="btn" data-action="apply-receipt-full">Применить описание и сумму</button>
+      <button class="btn" data-action="apply-receipt-full">Применить описание, сумму и дату</button>
       <button class="btn secondary" data-action="apply-receipt-desc-only" style="margin-top:8px">Вставить только описание</button>
       ${receipt.rawUrl ? `<a href="${esc(receipt.rawUrl)}" target="_blank" rel="noopener" class="btn secondary" style="margin-top:8px;text-align:center;text-decoration:none;display:block">Открыть оригинал на сайте ДПС ↗</a>` : ''}
     </div>
@@ -1966,10 +1974,15 @@ document.addEventListener('click', (e) => {
     case 'apply-receipt-full': {
       const r = ui.pendingReceipt;
       if (r && ui.tempTxForm) {
+        const storeHint = ui.tempTxForm.description || '';
         const descInput = document.getElementById('preview-receipt-desc');
-        ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r);
+        ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r, storeHint);
         if (r.amount) ui.tempTxForm.amount = r.amount;
         if (r.date) ui.tempTxForm.date = r.date;
+        const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(r.storeName || storeHint) : null;
+        if (merchant && merchant.category) {
+          ui.tempTxForm.categoryId = merchant.category;
+        }
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
         closeSheet();
         openTxForm(ui.tempTxForm);

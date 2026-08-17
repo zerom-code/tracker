@@ -1,7 +1,7 @@
 /* Сервис-воркер: кэшируем оболочку приложения, чтобы трекер открывался офлайн.
    Запросы к API (Monobank, НБУ) всегда идут в сеть. */
 
-const CACHE = 'tracker-v29';
+const CACHE = 'tracker-v30';
 const ASSETS = [
   './',
   './index.html',
