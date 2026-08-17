@@ -139,6 +139,26 @@ function renderHome() {
       </div>
     </div>
 
+    <div class="ai-card">
+      <div class="ai-card-top">
+        <div class="ai-card-title">
+          <span>✨</span>
+          <span>ИИ-Аналитик</span>
+        </div>
+        <span class="ai-card-badge">${esc(state.settings.openaiModel || 'GPT 5.6 Luna')}</span>
+      </div>
+      <div class="ai-card-sub">
+        Задайте вопрос по тратам, товарам из чеков и оптимизации бюджета.
+      </div>
+      <div class="ai-quick-grid">
+        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="На какие продукты я потратил больше всего денег?">🛒 Топ продуктов</button>
+        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="Проанализируй мои расходы за этот месяц и найди аномалии">📊 Анализ за месяц</button>
+        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="Где я могу сэкономить и оптимизировать траты?">💡 Где сэкономить?</button>
+        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="Сколько я потратил на сладости, кофе и перекусы?">☕ Сладости и кофе</button>
+      </div>
+      <button type="button" class="btn secondary" data-action="open-ai-chat" style="padding:10px;font-size:14px;width:100%">💬 Спросить у ИИ</button>
+    </div>
+
     ${cats.length ? `
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -576,6 +596,38 @@ function renderSettings() {
     </div>
 
     <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="margin-bottom:0">Искусственный интеллект (OpenAI)</h3>
+        <span class="ai-card-badge">${esc(s.openaiModel || 'GPT 5.6 Luna')}</span>
+      </div>
+      <div class="field">
+        <label>API-ключ OpenAI</label>
+        <div class="field-split">
+          <input id="openai-key" type="password" autocomplete="off" autocapitalize="off" placeholder="sk-proj-..." value="${esc(s.openaiKey || '')}">
+          <button class="btn small secondary" data-action="toggle-key-visibility" style="flex:0 0 auto">👁</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Модель</label>
+        <input id="openai-model" type="text" placeholder="gpt-5.6-luna" value="${esc(s.openaiModel || 'gpt-5.6-luna')}">
+        <div class="chips" id="openai-model-chips" style="margin-top:6px;gap:6px">
+          ${['gpt-5.6-luna', 'gpt-4o-mini', 'gpt-4o', 'o1-mini'].map((m) => `
+            <button type="button" class="chip ${s.openaiModel === m ? 'active' : ''}" data-action="set-ai-model" data-val="${m}">${m}</button>
+          `).join('')}
+        </div>
+      </div>
+      <div class="field">
+        <label>Кастомный Base URL (необязательно)</label>
+        <input id="openai-base-url" type="text" placeholder="https://api.openai.com/v1/chat/completions" value="${esc(s.openaiBaseUrl || '')}">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn" data-action="save-ai-settings" style="flex:1">Сохранить</button>
+        <button class="btn secondary" data-action="test-ai-key" style="flex:1">Проверить связь</button>
+      </div>
+      <p class="hint">Ключ хранится локально на телефоне. Модель видит финансовую статистику и товары из чеков для ответа на ваши вопросы.</p>
+    </div>
+
+    <div class="card">
       <h3>Monobank</h3>
       ${monoBlock}
     </div>
@@ -610,7 +662,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 41</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 42</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -995,6 +1047,143 @@ function submitTxForm(form) {
   const [ty, tm] = date.split('-').map(Number);
   if (ty && tm) { ui.opsY = ty; ui.opsM = tm - 1; }
   save(); closeSheet(); render();
+}
+
+/* --- ИИ-финансовый аналитик (OpenAI) --- */
+
+function formatAiMarkdown(raw) {
+  if (!raw) return '';
+  let text = esc(raw);
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  const lines = text.split('\n');
+  let inList = false;
+  let inOl = false;
+  let out = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    if (/^[•\-*]\s+(.+)$/.test(line)) {
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      if (!inList) { out.push('<ul>'); inList = true; }
+      out.push(`<li>${line.replace(/^[•\-*]\s+/, '')}</li>`);
+    } else if (/^\d+\.\s+(.+)$/.test(line)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      if (!inOl) { out.push('<ol>'); inOl = true; }
+      out.push(`<li>${line.replace(/^\d+\.\s+/, '')}</li>`);
+    } else {
+      if (inList) { out.push('</ul>'); inList = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      if (line) out.push(`<p>${line}</p>`);
+    }
+  }
+  if (inList) out.push('</ul>');
+  if (inOl) out.push('</ol>');
+  return out.join('');
+}
+
+function openAiChatModal(initialPrompt = '') {
+  ui.aiChatHistory = ui.aiChatHistory || [];
+  const modelName = state.settings.openaiModel || 'GPT 5.6 Luna';
+
+  const historyHtml = ui.aiChatHistory.length ? ui.aiChatHistory.map((m) => `
+    <div class="ai-msg ${m.role === 'user' ? 'user' : 'assistant'}">
+      ${m.role === 'user' ? esc(m.content) : formatAiMarkdown(m.content)}
+    </div>
+  `).join('') : `
+    <div class="ai-msg assistant">
+      👋 Привет! Я ваш финансовый ИИ-аналитик на базе <strong>${esc(modelName)}</strong>.<br><br>
+      Я знаю все ваши траты, категории, подписки и товары из фискальных чеков.<br>
+      Спросите меня о чем угодно!
+    </div>
+  `;
+
+  openSheet(`
+    ${sheetHead('✨ ИИ-Аналитик (' + esc(modelName) + ')')}
+    <div class="ai-chat-sheet">
+      <div class="ai-quick-grid" style="margin-bottom:8px">
+        <button type="button" class="ai-quick-chip" data-action="ai-chat-prompt" data-prompt="На какие продукты я потратил больше всего денег?">🛒 Топ продуктов</button>
+        <button type="button" class="ai-quick-chip" data-action="ai-chat-prompt" data-prompt="Проанализируй мои расходы за этот месяц и найди аномалии">📊 Анализ за месяц</button>
+        <button type="button" class="ai-quick-chip" data-action="ai-chat-prompt" data-prompt="Где я могу сэкономить и оптимизировать траты?">💡 Где сэкономить?</button>
+        <button type="button" class="ai-quick-chip" data-action="ai-chat-prompt" data-prompt="Сколько я потратил на сладости, кофе и перекусы?">☕ Сладости и кофе</button>
+      </div>
+
+      <div class="ai-chat-messages" id="ai-chat-msgs">
+        ${historyHtml}
+      </div>
+
+      <form id="ai-chat-form" class="ai-input-bar" onsubmit="return false;">
+        <input id="ai-chat-input" type="text" placeholder="Задайте вопрос о финансах…" value="${esc(initialPrompt)}" autocomplete="off">
+        <button type="submit" class="ai-send-btn" data-action="send-ai-msg" aria-label="Отправить">↑</button>
+      </form>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+        <button type="button" class="btn-link-action" data-action="clear-ai-history" style="font-size:12px;color:var(--muted)">🗑️ Очистить диалог</button>
+        <span style="font-size:11px;color:var(--muted)">Модель: ${esc(modelName)}</span>
+      </div>
+    </div>
+  `);
+
+  const msgsEl = document.getElementById('ai-chat-msgs');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+
+  if (initialPrompt) {
+    setTimeout(() => {
+      sendAiChatMessage(initialPrompt);
+    }, 150);
+  }
+}
+
+async function sendAiChatMessage(text) {
+  const prompt = text || (document.getElementById('ai-chat-input') && document.getElementById('ai-chat-input').value.trim());
+  if (!prompt) return;
+
+  const inputEl = document.getElementById('ai-chat-input');
+  if (inputEl) inputEl.value = '';
+
+  const msgsEl = document.getElementById('ai-chat-msgs');
+  if (!msgsEl) return;
+
+  ui.aiChatHistory = ui.aiChatHistory || [];
+
+  // Добавляем сообщение пользователя
+  const userDiv = document.createElement('div');
+  userDiv.className = 'ai-msg user';
+  userDiv.textContent = prompt;
+  msgsEl.appendChild(userDiv);
+
+  // Добавляем индикатор печати
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'ai-msg assistant ai-typing';
+  typingDiv.id = 'ai-typing-indicator';
+  typingDiv.innerHTML = '<span></span><span></span><span></span>';
+  msgsEl.appendChild(typingDiv);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+
+  try {
+    const answer = await askAiAssistant(prompt, ui.aiChatHistory);
+    ui.aiChatHistory.push({ role: 'user', content: prompt });
+    ui.aiChatHistory.push({ role: 'assistant', content: answer });
+
+    const typingEl = document.getElementById('ai-typing-indicator');
+    if (typingEl) typingEl.remove();
+
+    const ansDiv = document.createElement('div');
+    ansDiv.className = 'ai-msg assistant';
+    ansDiv.innerHTML = formatAiMarkdown(answer);
+    msgsEl.appendChild(ansDiv);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  } catch (err) {
+    const typingEl = document.getElementById('ai-typing-indicator');
+    if (typingEl) typingEl.remove();
+
+    const errDiv = document.createElement('div');
+    errDiv.className = 'ai-msg assistant';
+    errDiv.style.borderColor = 'var(--red)';
+    errDiv.innerHTML = `⚠️ <strong>Ошибка:</strong> ${esc(err.message)}`;
+    msgsEl.appendChild(errDiv);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+  }
 }
 
 /* --- Сканирование и обработка QR-кода чека --- */
@@ -2323,6 +2512,69 @@ document.addEventListener('click', async (e) => {
       syncReminders()
         .then((n) => { render(); toast(`Расписание обновлено: ${n} напоминаний`); })
         .catch((e) => toast(e.message));
+      break;
+    }
+
+    /* Действия ИИ-аналитика */
+    case 'open-ai-chat': openAiChatModal(); break;
+    case 'ai-quick-prompt': {
+      const p = el.dataset.prompt || '';
+      openAiChatModal(p);
+      break;
+    }
+    case 'ai-chat-prompt': {
+      const p = el.dataset.prompt || '';
+      sendAiChatMessage(p);
+      break;
+    }
+    case 'send-ai-msg': {
+      sendAiChatMessage();
+      break;
+    }
+    case 'clear-ai-history': {
+      ui.aiChatHistory = [];
+      openAiChatModal();
+      toast('Диалог очищен');
+      break;
+    }
+    case 'set-ai-model': {
+      const m = el.dataset.val;
+      const input = document.getElementById('openai-model');
+      if (input) input.value = m;
+      document.querySelectorAll('#openai-model-chips .chip').forEach((b) => b.classList.toggle('active', b === el));
+      break;
+    }
+    case 'toggle-key-visibility': {
+      const input = document.getElementById('openai-key');
+      if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
+      }
+      break;
+    }
+    case 'save-ai-settings': {
+      const keyEl = document.getElementById('openai-key');
+      const modelEl = document.getElementById('openai-model');
+      const baseUrlEl = document.getElementById('openai-base-url');
+      if (keyEl) state.settings.openaiKey = keyEl.value.trim();
+      if (modelEl) state.settings.openaiModel = modelEl.value.trim() || 'gpt-5.6-luna';
+      if (baseUrlEl) state.settings.openaiBaseUrl = baseUrlEl.value.trim();
+      save(); render();
+      toast('Настройки ИИ сохранены ✨');
+      break;
+    }
+    case 'test-ai-key': {
+      const key = document.getElementById('openai-key')?.value.trim() || state.settings.openaiKey;
+      const model = document.getElementById('openai-model')?.value.trim() || state.settings.openaiModel;
+      const baseUrl = document.getElementById('openai-base-url')?.value.trim() || state.settings.openaiBaseUrl;
+      if (!key) { toast('Сначала введите API-ключ'); break; }
+      withBusy(el, 'Проверяем…', async () => {
+        try {
+          const res = await testAiConnection(key, model, baseUrl);
+          toast('Связь с ' + (model || 'GPT') + ' успешна: ' + res + ' ✨');
+        } catch (e) {
+          alert('Ошибка проверки OpenAI: ' + e.message);
+        }
+      });
       break;
     }
 

@@ -30,6 +30,9 @@ function defaultState() {
       deviceToken: '',
       remindDays: 1,         // за сколько дней напоминать о платеже
       remindHour: 10,        // в котором часу (по времени телефона)
+      openaiKey: '',         // персональный API-ключ OpenAI
+      openaiModel: 'gpt-5.6-luna', // модель по умолчанию
+      openaiBaseUrl: '',     // опциональный кастомный URL эндпоинта
     },
     sync: {
       cursor: 0,             // до какой операции сервера уже забрали
