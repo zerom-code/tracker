@@ -609,7 +609,10 @@ function renderSettings() {
       <p class="hint">Все данные хранятся только в этом браузере на вашем устройстве и никуда не отправляются. Делайте копию время от времени.</p>
     </div>
 
-    <p class="hint" style="text-align:center" data-action="diag-toggle">Трекер трат · версия 31</p>
+    <p class="hint" style="text-align:center">
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 31</span> ·
+      <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
+    </p>
     ${ui.showDiag ? `
     <div class="card">
       <h3>Диагностика экрана</h3>
@@ -1942,6 +1945,27 @@ document.addEventListener('click', (e) => {
     case 'modal-close':
       if (!e.target.closest('[data-stop-close]') || e.target.closest('.sheet-close')) closeSheet();
       break;
+
+    case 'force-sw-update': {
+      toast('Проверяем обновления…');
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistration().then((reg) => {
+          if (reg) {
+            reg.update().then(() => {
+              if (reg.waiting) {
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+              }
+              setTimeout(() => { window.location.reload(); }, 400);
+            }).catch(() => { window.location.reload(); });
+          } else {
+            window.location.reload();
+          }
+        }).catch(() => { window.location.reload(); });
+      } else {
+        window.location.reload();
+      }
+      break;
+    }
 
     case 'ops-filter':
       ui.opsFilter = val;
