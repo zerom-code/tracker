@@ -121,7 +121,7 @@ ${financialContext}
     max_completion_tokens: 2500,
   };
 
-  const res = await fetch(baseUrl, {
+  let res = await fetch(baseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -131,13 +131,37 @@ ${financialContext}
   });
 
   if (!res.ok) {
+    let errJson = null;
     let errText = '';
     try {
-      const errJson = await res.json();
+      errJson = await res.json();
       errText = (errJson.error && errJson.error.message) || JSON.stringify(errJson);
     } catch (e) {
       errText = `HTTP ${res.status}: ${res.statusText}`;
     }
+
+    // Авто-повтор для моделей с поддержкой роли 'developer' вместо 'system'
+    if (res.status === 400 && errText && (errText.includes('developer') || errText.includes('system') || errText.includes('role'))) {
+      const devMessages = messages.map((m, idx) => (idx === 0 && m.role === 'system') ? { ...m, role: 'developer' } : m);
+      const retryRes = await fetch(baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: devMessages,
+          max_completion_tokens: 2500,
+        }),
+      });
+      if (retryRes.ok) {
+        const data = await retryRes.json();
+        const answer = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (answer) return answer.trim();
+      }
+    }
+
     if (res.status === 401) {
       throw new Error('Неверный API-ключ OpenAI. Проверьте ключ в настройках «Ещё».');
     }
