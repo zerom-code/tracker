@@ -610,7 +610,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 40</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 41</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -2137,6 +2137,10 @@ document.addEventListener('click', async (e) => {
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
         closeSheet();
         openTxForm(ui.tempTxForm);
+        toast('Описание чека добавлено ✨');
+      }
+      break;
+    }
     case 'reload-tx-receipt-items': {
       const receiptUrl = document.getElementById('tx-receipt-url') ? document.getElementById('tx-receipt-url').value : '';
       if (!receiptUrl) { toast('Ссылка на чек отсутствует'); break; }
