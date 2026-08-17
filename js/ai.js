@@ -3,6 +3,16 @@
 /**
  * Собирает структурированный финансовый контекст приложения для передачи в промпт ИИ.
  */
+function extractStoreAndProducts(desc) {
+  if (!desc) return { store: 'Не указан', products: 'Покупка' };
+  const trimmed = desc.trim();
+  const m = trimmed.match(/^([^()]+?)\s*\((.+)\)$/);
+  if (m) {
+    return { store: m[1].trim(), products: m[2].trim() };
+  }
+  return { store: trimmed, products: trimmed };
+}
+
 function buildFinancialContext() {
   const baseCur = state.settings.baseCurrency || 'UAH';
   const now = new Date();
@@ -37,48 +47,82 @@ function buildFinancialContext() {
     });
   }
 
-  // Все операции за последние 60 дней с акцентом на описание купленного и товары из чеков
+  // Все операции за последние 60 дней со строгим разделением магазина и купленных товаров
   const cutoff = new Date(Date.now() - 60 * 86400 * 1000).toISOString().slice(0, 10);
   const expenseTxs = state.transactions
     .filter((t) => (t.date >= cutoff && (t.type === 'expense' || !t.type)))
-    .sort((a, b) => b.amount - a.amount); // сортируем по убыванию суммы
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
 
-  const itemizedPurchases = [];
-  for (const t of expenseTxs) {
+  const detailedPurchases = expenseTxs.map((t) => {
+    const { store, products } = extractStoreAndProducts(t.description);
     const cat = categoryById(t.categoryId || FALLBACK_CATEGORY).name;
-    if (t.receiptItems && t.receiptItems.length) {
-      for (const it of t.receiptItems) {
-        itemizedPurchases.push({
+    const items = (t.receiptItems && t.receiptItems.length)
+      ? t.receiptItems.map((it) => `${it.name} (${it.total} ${t.currency})`).join(', ')
+      : '';
+    return {
+      date: t.date,
+      store: store,
+      purchasedProducts: products,
+      amount: `${t.amount} ${t.currency}`,
+      category: cat,
+      itemizedReceipt: items || 'нет детализации позиций',
+    };
+  });
+
+  // Автоматическая группировка продуктов по ключевым словам для быстрого и точного анализа
+  const productKeywordMap = {};
+  const keywordsList = [
+    { key: 'Пиво', match: /пив[оаеи]/i },
+    { key: 'Сидр', match: /сидр/i },
+    { key: 'Настойки и крепкий алкоголь', match: /настойк|водк|виски|ром|джин|коньяк/i },
+    { key: 'Вино', match: /вин[оа]/i },
+    { key: 'Мясо и курица', match: /мяс|куриц|курк|говяд|свин|фарш|печень|стегн/i },
+    { key: 'Пельмени и полуфабрикаты', match: /пельмен|вареник|лазань/i },
+    { key: 'Сосиски и колбасы', match: /сосиск|колбас|ковбас|сард/i },
+    { key: 'Сладости и KitKat', match: /kitkat|кіткат|шоколад|батончик|конфет|печень|торт/i },
+    { key: 'Снеки, чипсы и орешки', match: /чипс|орешк|горіх|сухарик|снек/i },
+    { key: 'Напитки и кофе', match: /pepsi|пепси|кола|cola|кофе|кава|чай|сок|энергетик|енергетик/i },
+    { key: 'Сыр и молочка', match: /сыр|сир|молок|сметан|творог|йогурт/i },
+  ];
+
+  for (const t of expenseTxs) {
+    const textToSearch = `${t.description || ''} ${(t.receiptItems || []).map((x) => x.name).join(' ')}`;
+    const { store, products } = extractStoreAndProducts(t.description);
+    
+    for (const kw of keywordsList) {
+      if (kw.match.test(textToSearch)) {
+        if (!productKeywordMap[kw.key]) {
+          productKeywordMap[kw.key] = { totalEstimatedSpent: 0, count: 0, purchases: [] };
+        }
+        productKeywordMap[kw.key].totalEstimatedSpent += t.amount;
+        productKeywordMap[kw.key].count += 1;
+        productKeywordMap[kw.key].purchases.push({
           date: t.date,
-          item: it.name,
-          quantity: it.quantity || 1,
-          pricePerUnit: it.price || it.total,
-          totalCost: `${it.total} ${t.currency}`,
-          store: t.description || 'Чек',
-          category: cat
+          store: store,
+          amount: `${t.amount} ${t.currency}`,
+          description: products,
         });
       }
-    } else {
-      itemizedPurchases.push({
-        date: t.date,
-        item: t.description || 'Покупка без описания',
-        totalCost: `${t.amount} ${t.currency}`,
-        category: cat
-      });
     }
   }
+
+  const groupedProductsRanking = Object.entries(productKeywordMap)
+    .map(([name, data]) => ({
+      productGroup: name,
+      mentionsCount: data.count,
+      totalSum: `${data.totalEstimatedSpent.toFixed(2)} ${baseCur}`,
+      purchasesList: data.purchases,
+    }))
+    .sort((a, b) => parseFloat(b.totalSum) - parseFloat(a.totalSum));
 
   const allRecentTxs = state.transactions
     .filter((t) => (t.date >= cutoff))
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .slice(0, 150)
     .map((t) => {
+      const { store, products } = extractStoreAndProducts(t.description);
       const cat = t.type === 'transfer' ? 'Перевод' : (categoryById(t.categoryId || FALLBACK_CATEGORY).name);
-      let itemStr = '';
-      if (t.receiptItems && t.receiptItems.length) {
-        itemStr = ' [Детализация товаров из чека: ' + t.receiptItems.map((it) => `${it.name}: ${it.total} ${t.currency}`).join(', ') + ']';
-      }
-      return `Дата: ${t.date} | Тип: ${t.type || 'Расход'} | Сумма: ${t.amount} ${t.currency} | Категория: ${cat} | Описание (купленный товар/услуга): "${t.description || ''}"${itemStr}`;
+      return `Дата: ${t.date} | Магазин: "${store}" | Куплено: "${products}" | Сумма: ${t.amount} ${t.currency} | Категория: ${cat}`;
     });
 
   // Подписки и рассрочки
@@ -101,8 +145,8 @@ function buildFinancialContext() {
     baseCurrency: baseCur,
     usdRate: rateInfo,
     monthlyStats: monthsData,
-    purchasesRankedByCost: itemizedPurchases.slice(0, 80),
-    transactionsList: allRecentTxs,
+    aggregatedProductGroupsBySpending: groupedProductsRanking,
+    detailedPurchasesList: detailedPurchases,
     subscriptions: subs,
     debts: debts,
   }, null, 2);
@@ -125,22 +169,25 @@ async function askAiAssistant(userMessage, chatHistory = []) {
   const systemMessage = {
     role: 'system',
     content: `Ты — личный финансовый ИИ-аналитик и эксперт по оптимизации расходов в приложении «Трекер трат».
-У тебя есть доступ к финансовым данным пользователя: списку транзакций, категориям, подпискам, долгам и товарам.
+У тебя есть доступ к актуальным финансовым данным пользователя: списку транзакций, категориям, подпискам, долгам и товарам.
 
 ДАННЫЕ ПОЛЬЗОВАТЕЛЯ (JSON):
 ${financialContext}
 
 КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА:
-1. Поле "Описание" (description) или "item" содержит конкретное название товара, услуги или купленных продуктов, указанное пользователем или банком (например: "Пельмени", "Сосиски", "Мясо и куриные продукты", "Пиво и орешки", "Сидр и настойки", "КітКат", "Атб-Маркет").
-2. Сумма операции (amount/totalCost) — это точная стоимость этого товара или набора товаров.
-3. Если пользователь спрашивает "На какой товар я потратил больше всего?", "Какие самые дорогие покупки?", "Сколько ушло на конкретный товар?":
-   - ОБЯЗАТЕЛЬНО проанализируй поле "Описание" (description / item) и суммы (totalCost / amount), а также детализацию чеков.
-   - Составь конкретный ТОП-рейтинг самых дорогих товаров/покупок от большей суммы к меньшей (например: 1. **Мясо и куриные продукты** — **427 ₴**, 2. **Пельмени** — **360,30 ₴**, 3. **Сосиски** — **259 ₴**...).
-   - Если в описании указан один товар (например, "Пельмени 360,30 ₴"), считай всю сумму стоимостью этого товара.
-   - НИКОГДА не говори, что "нельзя определить самый дорогой товар" или "нет цен каждой позиции". Ты ВСЕГДА можешь ранжировать покупки по описаниям и суммам транзакций.
-4. Отвечай дружелюбно, профессионально, кратко и по существу на языке пользователя.
-5. Выделяй важные суммы, названия магазинов, товаров и процентов жирным шрифтом (**360,30 ₴**, **Пельмени**, **VARUS**).
-6. Структурируй ответы красивыми списками с эмодзи (🛒, 🥇, 🥈, 🥉, 💡, 📊, 💰).`
+1. СТРОГАЯ ТОЧНОСТЬ МАГАЗИНОВ:
+   Поле "store" содержит название магазина (например, ALKOMARKET, АТБ, VARUS).
+   НИКОГДА не путай магазины! Если покупка совершена в ALKOMARKET ("Пиво и орешки" 172 ₴) — пиши строго ALKOMARKET, а не АТБ!
+2. АНАЛИЗ ВОПРОСА "НА КАКОЙ ПРОДУКТ Я ПОТРАТИЛ БОЛЬШЕ ВСЕГО?":
+   - Пользователь имеет в виду конкретный продукт/тип товара во ВСЕХ магазинах за период (например: Пиво, Мясо/Курица, Сладости/KitKat, Сидр, Пельмени и т.д.).
+   - Используй готовый блок "aggregatedProductGroupsBySpending" и "detailedPurchasesList".
+   - Определи продукт-лидер, на который ушло больше всего денег и который чаще всего покупался.
+   - Приведи СПИСОК ВСЕХ покупок этого продукта с ТОЧНЫМ указанием правильного магазина, суммы и даты.
+   - Подведи четкий суммарный итог (сколько всего потрачено на этот продукт).
+3. ФОРМАТИРОВАНИЕ:
+   - Выделяй жирным шрифтом названия продуктов, магазинов и суммы (например: **Пиво**, **ALKOMARKET — 172 ₴**, **VARUS — 596,63 ₴**).
+   - Используй понятные списки с эмодзи (🍺, 🛒, 🥇, 🥈, 💡, 📊).
+   - Отвечай дружелюбно, профессионально, честно и без выдумок.`
   };
 
   const messages = [
