@@ -671,7 +671,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 48</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 49</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -2117,14 +2117,29 @@ document.addEventListener('click', async (e) => {
       if (internalField) internalField.hidden = seg.dataset.val === 'expense';
     }
     if (seg.parentElement.id === 'tx-cur-seg') {
+      const cur = seg.dataset.val;
       const label = document.getElementById('tx-alt-label');
       const input = document.getElementById('tx-alt');
-      if (label) label.textContent = altFieldLabel(seg.dataset.val);
+      if (label) label.textContent = altFieldLabel(cur);
       if (input) {
         input.placeholder = altFieldPlaceholder({
-          amount: document.getElementById('tx-amount').value, currency: seg.dataset.val,
+          amount: document.getElementById('tx-amount').value, currency: cur,
         });
         input.value = ''; // прежний эквивалент относился к другой валюте
+      }
+      const totalLabel = document.querySelector('#tx-receipt-items-container label span:last-child');
+      const form = document.getElementById('sheet-form');
+      const txId = form ? form.dataset.id : null;
+      const currentTx = txId ? state.transactions.find((x) => x.id === txId) : ui.tempTxForm;
+      if (currentTx && currentTx.receiptItems && currentTx.receiptItems.length) {
+        if (totalLabel) totalLabel.textContent = fmtMoney(currentTx.receiptItems.reduce((s, x) => s + (x.total || 0), 0), cur);
+        const rows = document.querySelectorAll('#tx-receipt-items-container .receipt-item-row');
+        currentTx.receiptItems.forEach((it, idx) => {
+          if (rows[idx]) {
+            const priceEl = rows[idx].querySelector('.item-price');
+            if (priceEl) priceEl.textContent = (it.quantity > 1 ? it.quantity + ' × ' : '') + fmtMoney(it.total, cur);
+          }
+        });
       }
     }
     return;
@@ -2318,6 +2333,7 @@ document.addEventListener('click', async (e) => {
         ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r, storeHint);
         if (r.amount) ui.tempTxForm.amount = r.amount;
         if (r.date) ui.tempTxForm.date = r.date;
+        ui.tempTxForm.currency = 'UAH';
         const store = r.storeName || storeHint || '';
         ui.tempTxForm.categoryId = detectCategoryFromItems(r.items || [], store);
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
@@ -2333,6 +2349,7 @@ document.addEventListener('click', async (e) => {
       if (r && ui.tempTxForm) {
         const descInput = document.getElementById('preview-receipt-desc');
         ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r);
+        ui.tempTxForm.currency = 'UAH';
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
         closeSheet();
         openTxForm(ui.tempTxForm);
