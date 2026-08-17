@@ -610,7 +610,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 31</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 32</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -990,11 +990,12 @@ function openQrScannerModal() {
         </div>
       </div>
 
-      <div class="scanner-actions">
+      <div class="scanner-actions" style="display:flex;flex-direction:column;gap:8px">
         <label class="btn secondary" style="cursor:pointer;margin-top:0;display:block;text-align:center">
           📁 Выбрать фото чека из галереи
           <input id="scanner-file" type="file" accept="image/*" style="display:none">
         </label>
+        <button type="button" class="btn secondary" data-action="paste-receipt-data">📋 Вставить XML / текст / ссылку чека</button>
       </div>
       <p class="hint" style="text-align:center;margin-top:10px">
         Наведите камеру на QR-код внизу фискального чека (ДПС, Checkbox, Вчасно и др.)
@@ -1073,7 +1074,7 @@ function openQrScannerModal() {
 async function handleScannedReceipt(rawText) {
   const parsed = parseReceiptQr(rawText);
   if (!parsed) {
-    toast('В этом QR-коде нет данных фискального чека');
+    toast('В этом тексте или QR-коде нет данных фискального чека');
     if (ui.tempTxForm) openTxForm(ui.tempTxForm);
     return;
   }
@@ -2004,6 +2005,42 @@ document.addEventListener('click', (e) => {
       ui.tempTxForm = captureCurrentTxForm();
       openQrScannerModal();
       break;
+    case 'paste-receipt-data': {
+      stopScannerCamera();
+      let text = '';
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        try { text = await navigator.clipboard.readText(); } catch (e) {}
+      }
+      if (!text) {
+        text = prompt('Вставьте ссылку, XML или текст чека:');
+      }
+      if (text && text.trim()) {
+        handleScannedReceipt(text.trim());
+      }
+      break;
+    }
+    case 'paste-receipt-xml': {
+      let text = '';
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        try { text = await navigator.clipboard.readText(); } catch (e) {}
+      }
+      if (!text) {
+        text = prompt('Вставьте скопированный XML или текст чека с сайта ДПС:');
+      }
+      if (text && text.trim()) {
+        const parsed = parseReceiptQr(text.trim());
+        if (parsed) {
+          if (ui.pendingReceipt && ui.pendingReceipt.rawUrl) {
+            parsed.rawUrl = ui.pendingReceipt.rawUrl;
+          }
+          openReceiptPreviewModal(parsed);
+          toast('Товары из чека успешно распознаны ✨');
+        } else {
+          toast('Не удалось распознать товары из вставленного текста');
+        }
+      }
+      break;
+    }
     case 'remove-tx-receipt': {
       const urlInput = document.getElementById('tx-receipt-url');
       if (urlInput) urlInput.value = '';

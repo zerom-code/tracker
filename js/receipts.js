@@ -7,6 +7,18 @@ function parseReceiptQr(raw) {
   if (!raw || typeof raw !== 'string') return null;
   const text = raw.trim();
 
+  // 0) Проверка на вставленный XML чека ДПС
+  if (text.includes('<RQ') || text.includes('<DAT') || text.includes('<P ') || (text.startsWith('<?xml') && text.includes('NM='))) {
+    const fromXml = parseFiscalXml(text);
+    if (fromXml) return fromXml;
+  }
+
+  // 0.5) Проверка на скопированный текст чека ДПС (АРТ.№ ...)
+  if (text.includes('АРТ.') || text.includes('Касовий чек') || text.includes('СУМА ДО СПЛАТИ')) {
+    const fromTxt = parseReceiptText(text);
+    if (fromTxt) return fromTxt;
+  }
+
   // 1) ДПС Украины: cabinet.tax.gov.ua/cashregs/check?...
   if (text.includes('cabinet.tax.gov.ua') || text.includes('tax.gov.ua/cashregs')) {
     try {
@@ -100,6 +112,115 @@ function parseReceiptQr(raw) {
   }
 
   return null;
+}
+
+/**
+ * Разбирает XML фискального чека ДПС (формат DATECS/РРО).
+ */
+function parseFiscalXml(xmlString) {
+  if (!xmlString || typeof xmlString !== 'string') return null;
+  if (!xmlString.includes('<RQ') && !xmlString.includes('<DAT') && !xmlString.includes('<P ') && !xmlString.includes('<C ')) {
+    return null;
+  }
+
+  const items = [];
+  const pRegex = /<P\b([^>]+)\/?>/gi;
+  let pMatch;
+  while ((pMatch = pRegex.exec(xmlString)) !== null) {
+    const attrs = pMatch[1];
+    const nameMatch = attrs.match(/NM="([^"]+)"/i);
+    const prcMatch = attrs.match(/PRC="([^"]+)"/i);
+    const qMatch = attrs.match(/Q="([^"]+)"/i);
+    const smMatch = attrs.match(/SM="([^"]+)"/i);
+
+    if (nameMatch) {
+      const name = nameMatch[1].trim();
+      const price = prcMatch ? parseInt(prcMatch[1], 10) / 100 : 0;
+      const quantity = qMatch ? parseInt(qMatch[1], 10) / 1000 : 1;
+      const total = smMatch ? parseInt(smMatch[1], 10) / 100 : (price * quantity);
+      items.push({ name, price, quantity, total });
+    }
+  }
+
+  const fnMatch = xmlString.match(/FN="([^"]+)"/i);
+  const noMatch = xmlString.match(/NO="([^"]+)"/i);
+  const tsMatch = xmlString.match(/TS="([^"]+)"/i);
+  const smMatch = xmlString.match(/<E\b[^>]*SM="([^"]+)"/i) || xmlString.match(/<M\b[^>]*SM="([^"]+)"/i);
+
+  let date = '';
+  let time = '';
+  if (tsMatch && tsMatch[1].length >= 14) {
+    const raw = tsMatch[1];
+    date = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+    time = `${raw.slice(8, 10)}:${raw.slice(10, 12)}:${raw.slice(12, 14)}`;
+  }
+
+  const amount = smMatch ? parseInt(smMatch[1], 10) / 100 : (items.reduce((s, i) => s + i.total, 0));
+  const fn = fnMatch ? fnMatch[1] : '';
+  const detected = typeof detectMerchantInfo === 'function' ? detectMerchantInfo('', fn) : { name: '', category: null };
+
+  return {
+    type: 'tax_gov_xml',
+    typeName: 'ДПС XML',
+    rawUrl: '',
+    fn,
+    id: noMatch ? noMatch[1] : '',
+    amount,
+    date,
+    time,
+    storeName: detected.name || '',
+    items,
+  };
+}
+
+/**
+ * Разбирает скопированный текст чека с сайта ДПС.
+ */
+function parseReceiptText(txt) {
+  if (!txt || typeof txt !== 'string') return null;
+  const items = [];
+  const lines = txt.split(/\r?\n/);
+  let totalSm = null;
+  let date = '';
+  let time = '';
+  let fn = '';
+  let id = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
+    if (artMatch) {
+      items.push({ name: artMatch[1].trim(), price: 0, quantity: 1, total: 0 });
+    }
+    const smMatch = line.match(/(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО)[\s:]+(\d+[.,]\d{2})/i);
+    if (smMatch) totalSm = parseFloat(smMatch[1].replace(',', '.'));
+
+    const dtMatch = line.match(/(\d{2})[-.](\d{2})[-.](\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)/);
+    if (dtMatch) {
+      date = `${dtMatch[3]}-${dtMatch[2]}-${dtMatch[1]}`;
+      time = dtMatch[4];
+    }
+    const fnM = line.match(/(?:РРО\s+)?ФН\s*(\d{8,12})/i);
+    if (fnM) fn = fnM[1];
+    const idM = line.match(/ЧЕК\s+(?:ФН\s+)?(?:№\s*)?(\d+)/i);
+    if (idM) id = idM[1];
+  }
+
+  if (!items.length) return null;
+
+  const detected = typeof detectMerchantInfo === 'function' ? detectMerchantInfo('', fn) : { name: '', category: null };
+  return {
+    type: 'tax_gov_text',
+    typeName: 'ДПС Текст',
+    rawUrl: '',
+    fn,
+    id,
+    amount: totalSm,
+    date,
+    time,
+    storeName: detected.name || '',
+    items,
+  };
 }
 
 /**
