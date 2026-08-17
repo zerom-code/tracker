@@ -59,14 +59,23 @@ function moneyBoth(amountBase) {
 /* ================= отрисовка экранов ================= */
 
 function render() {
-  document.querySelectorAll('.tabbar button').forEach((b) => {
-    b.classList.toggle('active', b.dataset.nav === ui.screen);
-  });
   const renderers = {
     home: renderHome, ops: renderOps, subs: renderSubs,
     debts: renderDebts, settings: renderSettings,
   };
-  screenEl.innerHTML = renderers[ui.screen]();
+  const renderer = renderers[ui.screen] || renderHome;
+  if (!renderers[ui.screen]) ui.screen = 'home';
+
+  document.querySelectorAll('.tabbar button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.nav === ui.screen);
+  });
+
+  try {
+    screenEl.innerHTML = renderer();
+  } catch (err) {
+    console.error('Render error:', err);
+    screenEl.innerHTML = `<div class="card" style="margin:20px;text-align:center"><h3>Ошибка отображения</h3><p class="hint">${esc(err.message)}</p><button class="btn secondary" onclick="ui.screen='home';render()">На главную</button></div>`;
+  }
   fabEl.hidden = ui.screen === 'settings';
 }
 
@@ -662,7 +671,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 44</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 45</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -2563,9 +2572,12 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'test-ai-key': {
-      const key = document.getElementById('openai-key')?.value.trim() || state.settings.openaiKey;
-      const model = document.getElementById('openai-model')?.value.trim() || state.settings.openaiModel;
-      const baseUrl = document.getElementById('openai-base-url')?.value.trim() || state.settings.openaiBaseUrl;
+      const keyInput = document.getElementById('openai-key');
+      const modelInput = document.getElementById('openai-model');
+      const baseUrlInput = document.getElementById('openai-base-url');
+      const key = (keyInput ? keyInput.value.trim() : '') || state.settings.openaiKey;
+      const model = (modelInput ? modelInput.value.trim() : '') || state.settings.openaiModel;
+      const baseUrl = (baseUrlInput ? baseUrlInput.value.trim() : '') || state.settings.openaiBaseUrl;
       if (!key) { toast('Сначала введите API-ключ'); break; }
       withBusy(el, 'Проверяем…', async () => {
         try {
