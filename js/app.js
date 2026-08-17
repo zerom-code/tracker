@@ -3,12 +3,22 @@
 const now = new Date();
 const ui = {
   screen: 'home',
-  opsFilter: 'all',            // all | expense | transfer
+  opsFilter: 'all',            // all | expense | transfer | income
+  opsCategory: null,           // null | categoryId
   opsY: now.getFullYear(),
   opsM: now.getMonth(),
   debtsTab: 'owe-me',          // owe-me | i-owe
   showDiag: false,
 };
+
+function pluralOps(n) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs >= 11 && abs <= 19) return 'операций';
+  if (last === 1) return 'операция';
+  if (last >= 2 && last <= 4) return 'операции';
+  return 'операций';
+}
 
 const MONTHS_RU_PREP = ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне',
   'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'];
@@ -131,14 +141,17 @@ function renderHome() {
 
     ${cats.length ? `
     <div class="card">
-      <h3>Категории за месяц</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="margin-bottom:0">Категории за месяц</h3>
+        <span style="color:var(--muted);font-size:12px">нажмите для деталей</span>
+      </div>
       ${cats.map(([id, sum]) => {
         const c = id === TRANSFERS_ROW ? { emoji: '🔁', name: 'Переводы' } : categoryById(id);
         return `
-        <div class="cat-bar">
+        <div class="cat-bar" data-action="home-cat-click" data-cat="${esc(id)}" role="button" tabindex="0">
           <div class="cat-bar-top">
             <span class="name">${c.emoji} ${esc(c.name)}</span>
-            <span class="val">${fmtMoney(sum, state.settings.baseCurrency)}</span>
+            <span class="val">${fmtMoney(sum, state.settings.baseCurrency)} <span class="cat-arrow">›</span></span>
           </div>
           <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${Math.max(3, Math.round(sum / maxCat * 100))}%"></div></div>
         </div>`;
@@ -163,14 +176,24 @@ function renderHome() {
 /* ---------- операции ---------- */
 
 function renderOps() {
-  const { opsY: y, opsM: m } = ui;
+  const { opsY: y, opsM: m, opsCategory } = ui;
   // «Расходы» показывают и переводы — они тоже расход, просто отдельного вида.
   // Переводы между своими не считаются нигде и видны в «Все» и «Переводы».
   const matchesFilter = (t) => {
-    if (ui.opsFilter === 'all') return true;
-    if (t.internal) return ui.opsFilter === 'transfer';
-    return ui.opsFilter === 'expense' ? isOutflow(t) : t.type === ui.opsFilter;
+    let typeOk = true;
+    if (ui.opsFilter === 'all') typeOk = true;
+    else if (t.internal) typeOk = ui.opsFilter === 'transfer';
+    else typeOk = ui.opsFilter === 'expense' ? isOutflow(t) : t.type === ui.opsFilter;
+    if (!typeOk) return false;
+
+    if (opsCategory) {
+      if (t.type === 'transfer') return false;
+      const catId = t.categoryId || FALLBACK_CATEGORY;
+      if (catId !== opsCategory) return false;
+    }
+    return true;
   };
+
   const monthTx = txOfMonth(y, m).filter(matchesFilter);
   const sorted = monthTx.sort((a, b) =>
     a.date === b.date ? (b.ts || 0) - (a.ts || 0) : (a.date < b.date ? 1 : -1));
@@ -178,6 +201,10 @@ function renderOps() {
   const expSum = sumBase(outflowOfMonth(y, m)); // вместе с переводами
   const trSum = sumBase(txOfMonth(y, m, 'transfer'));
   const inSum = sumBase(txOfMonth(y, m, 'income'));
+
+  const activeCat = opsCategory ? categoryById(opsCategory) : null;
+  const catSum = opsCategory ? sumBase(monthTx) : 0;
+  const catPct = (opsCategory && expSum > 0) ? Math.round(catSum / expSum * 100) : 0;
 
   const groups = [];
   for (const t of sorted) {
@@ -195,19 +222,57 @@ function renderOps() {
       <button data-action="month-next">›</button>
     </div>
 
-    <div class="segmented seg-tight" style="margin-bottom:12px">
+    <div class="segmented seg-tight" style="margin-bottom:10px">
       <button data-action="ops-filter" data-val="all" class="${ui.opsFilter === 'all' ? 'active' : ''}">Все</button>
       <button data-action="ops-filter" data-val="expense" class="${ui.opsFilter === 'expense' ? 'active' : ''}">Расходы</button>
       <button data-action="ops-filter" data-val="transfer" class="${ui.opsFilter === 'transfer' ? 'active' : ''}">Переводы</button>
       <button data-action="ops-filter" data-val="income" class="${ui.opsFilter === 'income' ? 'active' : ''}">Доходы</button>
     </div>
 
+    ${ui.opsFilter !== 'transfer' ? `
+    <div class="ops-filter-row">
+      <div class="cat-select-wrap">
+        <select id="ops-cat-select" aria-label="Фильтр по категории">
+          <option value="">Все категории</option>
+          ${state.categories.map((c) => `
+            <option value="${esc(c.id)}" ${opsCategory === c.id ? 'selected' : ''}>
+              ${esc(c.emoji)} ${esc(c.name)}
+            </option>
+          `).join('')}
+        </select>
+        <span class="cat-select-arrow">▾</span>
+      </div>
+    </div>` : ''}
+
+    ${opsCategory ? `
+    <div class="active-filter-badge">
+      <div class="filter-badge-left">
+        <span class="filter-emoji">${activeCat.emoji}</span>
+        <div class="filter-texts">
+          <div class="filter-title">${esc(activeCat.name)}</div>
+          <div class="filter-sub">${monthTx.length} ${pluralOps(monthTx.length)}${catPct ? ' · ' + catPct + '% от расходов' : ''}</div>
+        </div>
+      </div>
+      <button class="filter-clear-btn" data-action="ops-cat-clear" title="Сбросить фильтр">✕ Сбросить</button>
+    </div>` : ''}
+
     <div class="card">
+      ${opsCategory ? `
+      <div class="cat-summary-line">
+        <div>
+          <div class="stat-label">По категории «${esc(activeCat.name)}»</div>
+          <div class="big-amount" style="font-size:24px;margin-top:2px">${fmtMoney(catSum, state.settings.baseCurrency)}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="stat-label">Всего расходов</div>
+          <div style="font-size:16px;font-weight:700;color:var(--muted);margin-top:4px">${fmtMoney(expSum, state.settings.baseCurrency)}</div>
+        </div>
+      </div>` : `
       <div class="sums-line">
         <span>Расходы<b>${fmtMoney(expSum, state.settings.baseCurrency)}</b></span>
         <span>из них переводы<b style="color:var(--accent)">${fmtMoney(trSum, state.settings.baseCurrency)}</b></span>
         <span>Доходы<b style="color:var(--green)">+${fmtMoney(inSum, state.settings.baseCurrency)}</b></span>
-      </div>
+      </div>`}
     </div>
 
     ${groups.length ? groups.map((g) => `
@@ -217,8 +282,10 @@ function renderOps() {
       </div>
     `).join('') : `
     <div class="empty">
-      <div class="empty-icon">🧾</div>
-      За этот месяц операций нет.<br>Добавьте трату кнопкой «+».
+      <div class="empty-icon">${opsCategory ? activeCat.emoji : '🧾'}</div>
+      ${opsCategory
+        ? `В категории «${esc(activeCat.name)}» за ${MONTHS_RU_PREP[m]} ${y} операций нет.`
+        : `За ${MONTHS_RU_PREP[m]} ${y} операций нет.<br>Добавьте трату кнопкой «+».`}
     </div>`}
   `;
 }
@@ -766,7 +833,8 @@ function openTxForm(tx) {
   const t = tx || {
     type: ui.screen === 'ops' ? defaultType : 'expense',
     amount: '', currency: state.settings.baseCurrency,
-    categoryId: null, description: '', date: todayISO(),
+    categoryId: (ui.screen === 'ops' && ui.opsCategory) ? ui.opsCategory : null,
+    description: '', date: todayISO(),
   };
 
   openSheet(`
@@ -1626,14 +1694,38 @@ document.addEventListener('click', (e) => {
 
   const el = e.target.closest('[data-action]');
   if (!el) return;
-  const { action, id, val, debt } = el.dataset;
+  const { action, id, val, debt, cat } = el.dataset;
 
   switch (action) {
     case 'modal-close':
       if (!e.target.closest('[data-stop-close]') || e.target.closest('.sheet-close')) closeSheet();
       break;
 
-    case 'ops-filter': ui.opsFilter = val; render(); break;
+    case 'ops-filter':
+      ui.opsFilter = val;
+      if (val === 'transfer') ui.opsCategory = null;
+      render();
+      break;
+    case 'ops-cat-clear':
+      ui.opsCategory = null;
+      render();
+      break;
+    case 'home-cat-click': {
+      if (cat === TRANSFERS_ROW) {
+        ui.opsFilter = 'transfer';
+        ui.opsCategory = null;
+      } else {
+        ui.opsFilter = 'expense';
+        ui.opsCategory = cat;
+      }
+      ui.opsY = now.getFullYear();
+      ui.opsM = now.getMonth();
+      ui.screen = 'ops';
+      history.replaceState(null, '', '#ops');
+      render();
+      screenEl.scrollTop = 0;
+      break;
+    }
     case 'debts-tab': ui.debtsTab = val; render(); break;
     case 'month-prev':
       ui.opsM--; if (ui.opsM < 0) { ui.opsM = 11; ui.opsY--; }
@@ -1815,6 +1907,10 @@ document.addEventListener('submit', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'ops-cat-select') {
+    ui.opsCategory = e.target.value || null;
+    render();
+  }
   if (e.target && e.target.id === 'import-file' && e.target.files[0]) {
     importDataFile(e.target.files[0]);
     e.target.value = '';
