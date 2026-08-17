@@ -610,7 +610,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 37</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 38</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -865,6 +865,7 @@ function captureCurrentTxForm() {
     date: document.getElementById('tx-date') ? document.getElementById('tx-date').value : todayISO(),
     internal: document.getElementById('tx-internal') ? document.getElementById('tx-internal').checked : false,
     receiptUrl: receiptUrlEl ? receiptUrlEl.value : (original ? original.receiptUrl : ''),
+    receiptItems: (ui.tempTxForm && ui.tempTxForm.receiptItems) || (original ? original.receiptItems : null) || [],
     source: original ? original.source : 'manual',
     sourceId: original ? original.sourceId : null,
   };
@@ -877,7 +878,7 @@ function openTxForm(tx) {
     type: ui.screen === 'ops' ? defaultType : 'expense',
     amount: '', currency: state.settings.baseCurrency,
     categoryId: (ui.screen === 'ops' && ui.opsCategory) ? ui.opsCategory : null,
-    description: '', date: todayISO(), receiptUrl: '',
+    description: '', date: todayISO(), receiptUrl: '', receiptItems: [],
   };
 
   openSheet(`
@@ -918,11 +919,27 @@ function openTxForm(tx) {
         </div>
         <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: маме на карту' : (t.type === 'income' ? 'например: зарплата' : 'например: кофе с собой')}" value="${esc(t.description)}">
         <input id="tx-receipt-url" type="hidden" value="${esc(t.receiptUrl || '')}">
-        <div id="tx-receipt-preview" class="receipt-attached-row" style="${t.receiptUrl ? '' : 'display:none'}">
+        <div id="tx-receipt-preview" class="receipt-attached-row" style="${(t.receiptUrl || (t.receiptItems && t.receiptItems.length)) ? '' : 'display:none'}">
           <span>🧾 Чек прикреплён</span>
           <a href="${esc(t.receiptUrl || '')}" id="tx-receipt-link" target="_blank" rel="noopener" class="receipt-link-btn" ${t.receiptUrl ? '' : 'style="display:none"'}>Открыть оригинал ↗</a>
           <button type="button" class="receipt-del-btn" data-action="remove-tx-receipt" title="Открепить чек">✕</button>
         </div>
+        ${t.receiptItems && t.receiptItems.length ? `
+          <div class="field" id="tx-receipt-items-container" style="margin-top:8px">
+            <label style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);margin-bottom:4px">
+              <span>Позиции из чека (${t.receiptItems.length})</span>
+              <span>${fmtMoney(t.receiptItems.reduce((s, x) => s + (x.total || 0), 0), t.currency || 'UAH')}</span>
+            </label>
+            <div class="receipt-items-list" style="max-height:160px;overflow-y:auto;background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:10px;border:1px solid var(--border)">
+              ${t.receiptItems.map((it) => `
+                <div class="receipt-item-row" style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04)">
+                  <span class="item-name" style="color:var(--text);font-weight:500">${esc(it.name)}</span>
+                  <span class="item-price" style="color:var(--muted);white-space:nowrap;margin-left:8px;font-variant-numeric:tabular-nums">${it.quantity > 1 ? it.quantity + ' × ' : ''}${fmtMoney(it.total, t.currency || 'UAH')}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
       </div>
       <div class="field" id="tx-internal-field" ${t.type === 'expense' ? 'hidden' : ''}>
         <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
@@ -1093,17 +1110,17 @@ async function handleScannedReceipt(rawText) {
 function openReceiptPreviewModal(receipt) {
   ui.pendingReceipt = receipt;
   const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
-  const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(receipt.storeName || storeHint, receipt.fn) : { name: '', category: null };
-  const storeName = merchant.name || receipt.storeName || receipt.typeName || 'Фіскальний чек';
+  const storeName = receipt.storeName || storeHint || receipt.typeName || 'Фіскальний чек';
+  const categoryId = detectCategoryFromItems(receipt.items || [], storeName);
+  const matchedCat = categoryId ? categoryById(categoryId) : null;
   const formattedDesc = formatReceiptDescription(receipt, storeHint);
-  const matchedCat = merchant.category ? categoryById(merchant.category) : null;
 
   const itemsHtml = receipt.items && receipt.items.length ? `
-    <div class="receipt-items-list">
+    <div class="receipt-items-list" style="margin-top:6px;max-height:220px;overflow-y:auto;background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:10px;border:1px solid var(--border)">
       ${receipt.items.map((it) => `
-        <div class="receipt-item-row">
-          <span class="item-name">${esc(it.name)}</span>
-          <span class="item-price">${it.quantity > 1 ? it.quantity + ' × ' : ''}${fmtMoney(it.total, 'UAH')}</span>
+        <div class="receipt-item-row" style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.04)">
+          <span class="item-name" style="color:var(--text);font-weight:500">${esc(it.name)}</span>
+          <span class="item-price" style="color:var(--muted);white-space:nowrap;margin-left:8px;font-variant-numeric:tabular-nums">${it.quantity > 1 ? it.quantity + ' × ' : ''}${fmtMoney(it.total, 'UAH')}</span>
         </div>
       `).join('')}
     </div>
@@ -1125,18 +1142,9 @@ function openReceiptPreviewModal(receipt) {
         ${matchedCat ? `<span class="chip" style="font-size:12px;padding:4px 8px">${matchedCat.emoji} ${esc(matchedCat.name)}</span>` : ''}
       </div>
 
-      <div class="field" style="margin-bottom:10px">
-        <label>Магазин / сеть</label>
-        <div class="chips" id="preview-store-chips" style="gap:6px">
-          ${['VARUS', 'АТБ', 'Сільпо', 'Novus', 'Фора', 'Епіцентр', 'EVA', 'Аптека'].map((name) => `
-            <button type="button" class="chip preview-store-chip ${storeName === name ? 'active' : ''}" data-store-name="${name}">${name}</button>
-          `).join('')}
-        </div>
-      </div>
-
       ${itemsHtml}
 
-      <div class="field" style="margin-top:10px">
+      <div class="field" style="margin-top:12px">
         <label>Описание для операции</label>
         <input id="preview-receipt-desc" type="text" value="${esc(formattedDesc)}">
         <p class="hint">Можете дополнить покупками (например: ${esc(storeName)} (Салфетки, курица))</p>
@@ -2069,21 +2077,22 @@ document.addEventListener('click', async (e) => {
         const description = descInput ? descInput.value.trim() : formatReceiptDescription(r, storeHint);
         const amount = r.amount || (ui.tempTxForm && ui.tempTxForm.amount) || 0;
         const date = r.date || (ui.tempTxForm && ui.tempTxForm.date) || todayISO();
-        const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(r.storeName || storeHint, r.fn) : null;
-        const categoryId = (merchant && merchant.category) || (ui.tempTxForm && ui.tempTxForm.categoryId) || 'groceries';
+        const store = r.storeName || storeHint || '';
+        const categoryId = detectCategoryFromItems(r.items || [], store);
         const receiptUrl = r.rawUrl || (ui.tempTxForm && ui.tempTxForm.receiptUrl) || '';
+        const receiptItems = (r.items && r.items.length) ? r.items : [];
         const type = (ui.tempTxForm && ui.tempTxForm.type) || 'expense';
         const currency = (ui.tempTxForm && ui.tempTxForm.currency) || 'UAH';
 
         if (ui.tempTxForm && ui.tempTxForm.id) {
           const t = state.transactions.find((x) => x.id === ui.tempTxForm.id);
           if (t) {
-            Object.assign(t, { description, amount, date, categoryId, receiptUrl, type, currency });
+            Object.assign(t, { description, amount, date, categoryId, receiptUrl, receiptItems, type, currency });
           }
         } else {
           state.transactions.push({
             id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
-            internal: false, altAmount: null, altCurrency: null, receiptUrl, source: 'manual', sourceId: null,
+            internal: false, altAmount: null, altCurrency: null, receiptUrl, receiptItems, source: 'manual', sourceId: null,
           });
         }
 
@@ -2104,11 +2113,10 @@ document.addEventListener('click', async (e) => {
         ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r, storeHint);
         if (r.amount) ui.tempTxForm.amount = r.amount;
         if (r.date) ui.tempTxForm.date = r.date;
-        const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(r.storeName || storeHint) : null;
-        if (merchant && merchant.category) {
-          ui.tempTxForm.categoryId = merchant.category;
-        }
+        const store = r.storeName || storeHint || '';
+        ui.tempTxForm.categoryId = detectCategoryFromItems(r.items || [], store);
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
+        ui.tempTxForm.receiptItems = (r.items && r.items.length) ? r.items : [];
         closeSheet();
         openTxForm(ui.tempTxForm);
         toast('Данные чека применены ✨');

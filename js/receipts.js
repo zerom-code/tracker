@@ -215,26 +215,56 @@ function parseReceiptText(txt) {
     const idM = line.match(/ЧЕК\s+(?:ФН\s+)?(?:№\s*)?(\d+)/i);
     if (idM) id = idM[1];
 
-    const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
+    // Конец товарной части чека (итоги)
+    if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА|КАРТКА|ПДВ|ДИСКОНТ|Скидка|ЧЕК:|Контрольне число|ФІСКАЛЬНИЙ ЧЕК)/i)) {
+      if (currentItem) {
+        items.push(currentItem);
+        currentItem = null;
+      }
+      if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА)/i)) {
+        break;
+      }
+    }
+
+    // 1. Поиск строки расчёта с любыми единицами измерения: "1.000 шт x 12.00 = 12.00 А"
+    const calcMatch = line.match(/^(\d+[.,]?\d*)\s*(?:[а-яіїєґa-z./]+)?\s*[xх*×]\s*(\d+[.,]?\d*)\s*=\s*(\d+[.,]?\d*)/i)
+      || line.match(/^(\d+[.,]?\d*)\s*(?:[а-яіїєґa-z./]+)?\s*[xх*×]\s*(\d+[.,]?\d*)/i);
+
+    if (calcMatch && currentItem) {
+      currentItem.quantity = parseFloat(calcMatch[1].replace(',', '.'));
+      currentItem.price = parseFloat(calcMatch[2].replace(',', '.'));
+      currentItem.total = calcMatch[3] ? parseFloat(calcMatch[3].replace(',', '.')) : (currentItem.quantity * currentItem.price);
+      items.push(currentItem);
+      currentItem = null;
+      continue;
+    }
+
+    // 2. Строка с ценой/суммой: "= 12.00" или "12.00 А"
+    const singlePriceMatch = line.match(/=\s*(\d+[.,]\d{2})\s*[а-яa-z]?$/i) || line.match(/^(\d+[.,]\d{2})\s*[А-ЯA-Z]$/);
+    if (singlePriceMatch && currentItem) {
+      currentItem.total = parseFloat(singlePriceMatch[1].replace(',', '.'));
+      if (!currentItem.price) currentItem.price = currentItem.total;
+      items.push(currentItem);
+      currentItem = null;
+      continue;
+    }
+
+    // 3. Начало новой позиции
+    const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i) || line.match(/^\d+\.\s+(.+)$/i);
     if (artMatch) {
       if (currentItem) items.push(currentItem);
       currentItem = {
         name: cleanProductName(artMatch[1]),
-        price: 0,
         quantity: 1,
+        price: 0,
         total: 0,
       };
       continue;
     }
 
-    const calcMatch = line.match(/^(\d+[.,]?\d*)\s*[xх*×]\s*(\d+[.,]?\d*)\s*=\s*(\d+[.,]?\d*)/i);
-    if (calcMatch && currentItem) {
-      currentItem.quantity = parseFloat(calcMatch[1].replace(',', '.'));
-      currentItem.price = parseFloat(calcMatch[2].replace(',', '.'));
-      currentItem.total = parseFloat(calcMatch[3].replace(',', '.'));
-      items.push(currentItem);
-      currentItem = null;
-      continue;
+    // 4. Дополнение многострочного названия товара
+    if (currentItem && !line.match(/^(?:Дисконт|Знижка|Штрих|ПДВ|Код)/i) && !line.startsWith('-') && !line.startsWith('=')) {
+      currentItem.name = cleanProductName(currentItem.name + ' ' + line);
     }
   }
 
@@ -330,70 +360,74 @@ async function fetchReceiptDetails(receipt) {
   return receipt;
 }
 
-const KNOWN_FN_PATTERNS = [
-  { pattern: /^300079|^300080|^300081|^300082/i, name: 'VARUS', category: 'groceries' }, // ТОВ "ОМЕГА" / VARUS
-  { pattern: /^300122|^300022|^300123|^300023|^300124/i, name: 'АТБ', category: 'groceries' }, // ТОВ "АТБ-Маркет"
-  { pattern: /^300055|^300056|^300057|^300058/i, name: 'Сільпо', category: 'groceries' }, // ТОВ "Сільпо-Фуд"
-  { pattern: /^300071|^300072/i, name: 'Фора', category: 'groceries' },
-  { pattern: /^300061|^300062/i, name: 'Novus', category: 'groceries' },
-  { pattern: /^300091|^300092/i, name: 'Епіцентр', category: 'home' },
-  { pattern: /^300045|^300046/i, name: 'EVA', category: 'health' },
-  { pattern: /^300031|^300032/i, name: 'WOG', category: 'transport' },
-  { pattern: /^300035|^300036/i, name: 'OKKO', category: 'transport' },
-];
+/**
+ * Универсально извлекает название магазина/бренда или юрлица из шапки чека.
+ */
+function extractUniversalStoreName(rawLines) {
+  if (!rawLines || !rawLines.length) return '';
+  let company = '';
+  let shop = '';
 
-const KNOWN_MERCHANTS = [
-  { keywords: [/varus|варус/i, /омега/i], name: 'VARUS', category: 'groceries' },
-  { keywords: [/атб|atb/i], name: 'АТБ', category: 'groceries' },
-  { keywords: [/сільпо|сильпо|silpo/i, /фоззі|fozzy/i], name: 'Сільпо', category: 'groceries' },
-  { keywords: [/фора|fora/i], name: 'Фора', category: 'groceries' },
-  { keywords: [/novus|новус/i], name: 'Novus', category: 'groceries' },
-  { keywords: [/ашан|auchan/i], name: 'Ашан', category: 'groceries' },
-  { keywords: [/metro|метро/i], name: 'METRO', category: 'groceries' },
-  { keywords: [/епіцентр|эпицентр|epicentr/i], name: 'Епіцентр', category: 'home' },
-  { keywords: [/eva|єва/i, /prostor|простор/i], name: 'EVA', category: 'health' },
-  { keywords: [/wog|вого/i], name: 'WOG', category: 'transport' },
-  { keywords: [/okko|окко/i], name: 'OKKO', category: 'transport' },
-  { keywords: [/socar|сокар/i], name: 'SOCAR', category: 'transport' },
-  { keywords: [/upg|упг/i], name: 'UPG', category: 'transport' },
-  { keywords: [/аптека|анц|бажаємо здоров|подорожник|віталюкс|911|фарм/i], name: 'Аптека', category: 'health' },
-  { keywords: [/mcdonald|макдоналд|кфс|kfc/i], name: 'McDonald’s', category: 'cafe' },
-  { keywords: [/rozetka|розетка/i], name: 'Rozetka', category: 'other' },
-  { keywords: [/нова пошта|новапошта|nova poshta/i], name: 'Нова Пошта', category: 'connection' },
-  { keywords: [/sinsay|синсей|zara|h&m|lc waikiki|reserved/i], name: 'Одяг', category: 'clothes' },
-];
+  for (let i = 0; i < Math.min(rawLines.length, 12); i++) {
+    const line = rawLines[i].trim();
+    if (!line || line.startsWith('-') || line.startsWith('=')) break;
+    if (line.includes('Касовий чек') || line.includes('РРО ФН') || line.includes('ПРРО ФН')) break;
+
+    const shopMatch = line.match(/(?:МАГАЗИН|СУПЕРМАРКЕТ|МАРКЕТ|ТОРГОВА ТОЧКА|АПТЕКА|АЗС|КАФЕ|РЕСТОРАН|ВІДДІЛЕННЯ)\s*(.+)?/i);
+    if (shopMatch && !shop) {
+      let raw = (shopMatch[1] || '').trim();
+      if (raw) {
+        raw = raw.replace(/(?:\s+|^)(?:ТЦ|ТРЦ|ТОЦ|ТРК|ТК|№|\d+)[^а-яa-z].*$/i, '').trim();
+        raw = raw.replace(/["'«»]/g, '').trim();
+        if (raw) shop = raw;
+      }
+    }
+
+    const compMatch = line.match(/(?:ТОВ|ДП|ПП|АТ|ПРАТ|ПАТ|ВАТ|ФОП)\s+["'«]?([^"'»\n]+)["'»]?/i);
+    if (compMatch && !company) {
+      company = compMatch[1].trim().replace(/["'«»]/g, '').trim();
+    }
+  }
+
+  return shop || company || '';
+}
 
 /**
- * Определяет название магазина и категорию по тексту описания или фискальному номеру (ФН).
+ * Умный классификатор категории по списку реально купленных товаров и названию магазина.
  */
-function detectMerchantInfo(hint, fn = '') {
-  // 1. По фискальному номеру РРО/ПРРО
-  if (fn) {
-    const cleanFn = String(fn).trim();
-    for (const item of KNOWN_FN_PATTERNS) {
-      if (item.pattern.test(cleanFn)) {
-        return { name: item.name, category: item.category };
-      }
-    }
-  }
+function detectCategoryFromItems(items = [], storeName = '') {
+  const text = (storeName + ' ' + (items || []).map((i) => i.name).join(' ')).toLowerCase();
 
-  // 2. По тексту подсказки / существующего описания
-  if (hint && typeof hint === 'string') {
-    const text = hint.trim();
-    for (const m of KNOWN_MERCHANTS) {
-      for (const kw of m.keywords) {
-        if (kw.test(text)) {
-          return { name: m.name, category: m.category };
-        }
-      }
-    }
-    if (text && text !== 'Чек по QR' && !text.startsWith('Чек №')) {
-      return { name: text.slice(0, 30), category: 'groceries' };
-    }
+  if (/кепка|штани|светр|куртка|футболка|джинси|сорочка|сукня|шорти|шкарпетки|білизна|плаття|взуття|одяг|sinsay|zara|h&m|reserved|cropp|house|stradivarius|pull&bear|bershka|lc waikiki/i.test(text)) {
+    return 'clothes';
   }
+  if (/ліки|таблетк|мазь|краплі|спрей|пластир|вітамін|шприц|бинт|аптек|анц|подорожник|бажаємо здоров|eva|єва|prostor|простор|косметик/i.test(text)) {
+    return 'health';
+  }
+  if (/паливо|бензин|дизель|газ\s+lpg|wog|okko|upg|socar|авто|миття|паркув/i.test(text)) {
+    return 'transport';
+  }
+  if (/піца|бургер|кава|чай|еспресо|капучино|латте|шаурма|суші|рол|ресторан|кафе|mcdonald|kfc/i.test(text)) {
+    return 'cafe';
+  }
+  if (/папір|клей|ручка|зошит|олівець|коректор|книга|підручник/i.test(text)) {
+    return 'education';
+  }
+  if (/цемент|фарба|плитка|дюбель|шуруп|інструмент|кріплення|епіцентр|jysk|лерой|нова лінія|господар/i.test(text)) {
+    return 'home';
+  }
+  return 'groceries';
+}
 
-  // По умолчанию фискальные чеки из магазинов — это продукты
-  return { name: '', category: 'groceries' };
+/**
+ * Определяет название магазина и категорию по тексту описания, названию или товарам.
+ */
+function detectMerchantInfo(hint = '', fn = '', items = []) {
+  const cat = detectCategoryFromItems(items, hint);
+  return {
+    name: hint.trim(),
+    category: cat,
+  };
 }
 
 /**
@@ -402,8 +436,7 @@ function detectMerchantInfo(hint, fn = '') {
 function formatReceiptDescription(receipt, storeHint = '') {
   if (!receipt) return '';
 
-  const detected = detectMerchantInfo(receipt.storeName || storeHint || '', receipt.fn);
-  const store = detected.name || receipt.storeName || storeHint || '';
+  const store = receipt.storeName || storeHint || '';
 
   // Если есть список распознанных товаров
   if (receipt.items && receipt.items.length > 0) {

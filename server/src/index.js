@@ -205,26 +205,84 @@ async function route(req, res, url, origin) {
             const decoded = Buffer.from(data.check, 'base64').toString('utf8');
             function cleanProductName(name) {
               if (!name || typeof name !== 'string') return '';
-              let cleaned = name.trim();
+              let cleaned = name.trim().replace(/\s+/g, ' ');
               cleaned = cleaned.replace(/([A-ZА-ЯІЇЄҐ])([A-ZА-ЯІЇЄҐ][a-zа-яіїєґ])/g, '$1 $2');
               cleaned = cleaned.replace(/([a-zа-яіїєґ0-9])([A-ZА-ЯІЇЄҐ])/g, '$1 $2');
               return cleaned.replace(/\s+/g, ' ').trim();
             }
 
+            function extractUniversalStoreName(rawLines) {
+              let company = '';
+              let shop = '';
+
+              for (let i = 0; i < Math.min(rawLines.length, 12); i++) {
+                const line = rawLines[i].trim();
+                if (!line || line.startsWith('-') || line.startsWith('=')) break;
+                if (line.includes('Касовий чек') || line.includes('РРО ФН') || line.includes('ПРРО ФН')) break;
+
+                const shopMatch = line.match(/(?:МАГАЗИН|СУПЕРМАРКЕТ|МАРКЕТ|ТОРГОВА ТОЧКА|АПТЕКА|АЗС|КАФЕ|РЕСТОРАН|ВІДДІЛЕННЯ)\s*(.+)?/i);
+                if (shopMatch && !shop) {
+                  let raw = (shopMatch[1] || '').trim();
+                  if (raw) {
+                    raw = raw.replace(/(?:\s+|^)(?:ТЦ|ТРЦ|ТОЦ|ТРК|ТК|№|\d+)[^а-яa-z].*$/i, '').trim();
+                    raw = raw.replace(/["'«»]/g, '').trim();
+                    if (raw) shop = raw;
+                  }
+                }
+
+                const compMatch = line.match(/(?:ТОВ|ДП|ПП|АТ|ПРАТ|ПАТ|ВАТ|ФОП)\s+["'«]?([^"'»\n]+)["'»]?/i);
+                if (compMatch && !company) {
+                  company = compMatch[1].trim().replace(/["'«»]/g, '').trim();
+                }
+              }
+
+              return shop || company || '';
+            }
+
             const items = [];
             const lines = decoded.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-            let storeName = '';
+            const storeName = extractUniversalStoreName(lines);
             let currentItem = null;
 
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i];
 
-              const storeMatch = line.match(/МАГАЗИН\s+"([^"]+)"|ТОВ\s+"([^"]+)"/i);
-              if (storeMatch && !storeName) {
-                storeName = storeMatch[1] || storeMatch[2] || '';
+              // Конец товарной части чека (итоги)
+              if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА|КАРТКА|ПДВ|ДИСКОНТ|Скидка|ЧЕК:|Контрольне число|ФІСКАЛЬНИЙ ЧЕК)/i)) {
+                if (currentItem) {
+                  items.push(currentItem);
+                  currentItem = null;
+                }
+                if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА)/i)) {
+                  break;
+                }
               }
 
-              const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
+              // 1. Поиск строки расчёта с любыми единицами измерения: "1.000 шт x 12.00 = 12.00 А"
+              const calcMatch = line.match(/^(\d+[.,]?\d*)\s*(?:[а-яіїєґa-z./]+)?\s*[xх*×]\s*(\d+[.,]?\d*)\s*=\s*(\d+[.,]?\d*)/i)
+                || line.match(/^(\d+[.,]?\d*)\s*(?:[а-яіїєґa-z./]+)?\s*[xх*×]\s*(\d+[.,]?\d*)/i);
+
+              if (calcMatch && currentItem) {
+                currentItem.quantity = parseFloat(calcMatch[1].replace(',', '.'));
+                currentItem.price = parseFloat(calcMatch[2].replace(',', '.'));
+                currentItem.total = calcMatch[3] ? parseFloat(calcMatch[3].replace(',', '.')) : (currentItem.quantity * currentItem.price);
+                items.push(currentItem);
+                currentItem = null;
+                continue;
+              }
+
+              // 2. Строка с ценой/суммой: "= 12.00" или "12.00 А"
+              const singlePriceMatch = line.match(/=\s*(\d+[.,]\d{2})\s*[а-яa-z]?$/i) || line.match(/^(\d+[.,]\d{2})\s*[А-ЯA-Z]$/);
+              if (singlePriceMatch && currentItem) {
+                currentItem.total = parseFloat(singlePriceMatch[1].replace(',', '.'));
+                if (!currentItem.price) currentItem.price = currentItem.total;
+                items.push(currentItem);
+                currentItem = null;
+                continue;
+              }
+
+              // 3. Начало новой позиции
+              const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i) || line.match(/^\d+\.\s+(.+)$/i);
               if (artMatch) {
                 if (currentItem) items.push(currentItem);
                 currentItem = {
@@ -236,14 +294,9 @@ async function route(req, res, url, origin) {
                 continue;
               }
 
-              const calcMatch = line.match(/^(\d+[.,]?\d*)\s*[xх*×]\s*(\d+[.,]?\d*)\s*=\s*(\d+[.,]?\d*)/i);
-              if (calcMatch && currentItem) {
-                currentItem.quantity = parseFloat(calcMatch[1].replace(',', '.'));
-                currentItem.price = parseFloat(calcMatch[2].replace(',', '.'));
-                currentItem.total = parseFloat(calcMatch[3].replace(',', '.'));
-                items.push(currentItem);
-                currentItem = null;
-                continue;
+              // 4. Дополнение многострочного названия товара
+              if (currentItem && !line.match(/^(?:Дисконт|Знижка|Штрих|ПДВ|Код)/i) && !line.startsWith('-') && !line.startsWith('=')) {
+                currentItem.name = cleanProductName(currentItem.name + ' ' + line);
               }
             }
 
