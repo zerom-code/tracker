@@ -159,6 +159,81 @@ async function route(req, res, url, origin) {
     }, origin);
   }
 
+  if (path === '/api/receipt' && req.method === 'GET') {
+    const rawUrl = url.searchParams.get('url') || '';
+    const fn = url.searchParams.get('fn') || '';
+    const id = url.searchParams.get('id') || '';
+    const date = url.searchParams.get('date') || '';
+    const time = url.searchParams.get('time') || '';
+    const sm = url.searchParams.get('sm') || '';
+
+    try {
+      let targetFn = fn;
+      let targetId = id;
+      let targetDate = date;
+      let targetTime = time;
+      let targetSm = sm;
+
+      if (rawUrl && (!targetFn || !targetId)) {
+        try {
+          const parsedUrl = new URL(rawUrl);
+          targetFn = targetFn || parsedUrl.searchParams.get('fn') || '';
+          targetId = targetId || parsedUrl.searchParams.get('id') || '';
+          const d = parsedUrl.searchParams.get('date') || '';
+          if (d.length === 8) {
+            targetDate = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+          }
+          const t = parsedUrl.searchParams.get('time') || '';
+          if (t.length === 6) {
+            targetTime = `${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}`;
+          }
+          targetSm = targetSm || parsedUrl.searchParams.get('sm') || '';
+        } catch (e) {}
+      }
+
+      if (targetFn && targetId) {
+        const formattedDate = targetDate ? `${targetDate} ${targetTime || '00:00:00'}` : '';
+        const dpsApiUrl = `https://cabinet.tax.gov.ua/ws/api_public/rro/chkAllWeb?id=${encodeURIComponent(targetId)}&date=${encodeURIComponent(formattedDate)}&type=1&captcha=&fn=${encodeURIComponent(targetFn)}&sm=${encodeURIComponent(targetSm || '')}`;
+        
+        const dpsRes = await fetch(dpsApiUrl, {
+          headers: { 'Accept': 'application/json, text/plain, */*' }
+        });
+        
+        if (dpsRes.ok) {
+          const data = await dpsRes.json();
+          if (data && data.check) {
+            const decoded = Buffer.from(data.check, 'base64').toString('utf8');
+            const items = [];
+            const lines = decoded.split(/\r?\n/);
+            let storeName = '';
+
+            for (const line of lines) {
+              const artMatch = line.trim().match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i);
+              if (artMatch) {
+                items.push({ name: artMatch[1].trim(), total: 0 });
+              }
+              const storeMatch = line.trim().match(/МАГАЗИН\s+"([^"]+)"|ТОВ\s+"([^"]+)"/i);
+              if (storeMatch && !storeName) {
+                storeName = storeMatch[1] || storeMatch[2] || '';
+              }
+            }
+
+            return json(res, 200, {
+              success: true,
+              storeName: storeName || '',
+              items,
+              rawText: decoded
+            }, origin);
+          }
+        }
+      }
+      return json(res, 200, { success: false, error: 'Чек не найден в ДПС' }, origin);
+    } catch (err) {
+      console.error('[receipt] error:', err.message);
+      return json(res, 500, { success: false, error: err.message }, origin);
+    }
+  }
+
   if (path === '/api/ops' && req.method === 'GET') {
     const since = Number(url.searchParams.get('since') || 0);
     const items = store.opsSince(since);

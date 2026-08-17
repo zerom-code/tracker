@@ -269,9 +269,17 @@ async function fetchReceiptDetails(receipt) {
   }
 
   // 2) Запрос через наш личный сервер (если подключен server.js), чтобы обойти CORS
-  if (typeof serverConfigured === 'function' && serverConfigured() && receipt.rawUrl) {
+  if (typeof serverConfigured === 'function' && serverConfigured()) {
     try {
-      const res = await serverFetch('/api/receipt?url=' + encodeURIComponent(receipt.rawUrl));
+      const q = new URLSearchParams({
+        url: receipt.rawUrl || '',
+        fn: receipt.fn || '',
+        id: receipt.id || '',
+        date: receipt.date || '',
+        time: receipt.time || '',
+        sm: receipt.amount != null ? String(receipt.amount) : '',
+      }).toString();
+      const res = await serverFetch('/api/receipt?' + q);
       if (res && res.success) {
         return {
           ...receipt,
