@@ -36,12 +36,12 @@ function parseReceiptQr(raw) {
         date = `${dateRaw.slice(0, 4)}-${dateRaw.slice(4, 6)}-${dateRaw.slice(6, 8)}`;
       }
 
-      // Преобразование времени (HHmmss -> HH:mm:ss или HHmm -> HH:mm)
+      // Преобразование времени (HHmmss -> HH:mm:ss или HHmm -> HH:mm:00)
       let time = '';
       if (timeRaw.length === 6) {
         time = `${timeRaw.slice(0, 2)}:${timeRaw.slice(2, 4)}:${timeRaw.slice(4, 6)}`;
       } else if (timeRaw.length === 4) {
-        time = `${timeRaw.slice(0, 2)}:${timeRaw.slice(2, 4)}`;
+        time = `${timeRaw.slice(0, 2)}:${timeRaw.slice(2, 4)}:00`;
       }
 
       const amount = parseFloat(sm.replace(',', '.')) || null;
@@ -361,6 +361,39 @@ async function fetchReceiptDetails(receipt) {
 }
 
 /**
+ * Нормализует бренд магазина к эталонному виду (VARUS, АТБ, SINSAY, Сільпо и т.д.).
+ */
+function normalizeBrandName(storeName = '', companyName = '') {
+  const combined = (storeName + ' ' + companyName).trim();
+  if (/varus|варус/i.test(combined)) return 'VARUS';
+  if (/атб|atb/i.test(combined)) return 'АТБ';
+  if (/сільпо|сильпо|silpo/i.test(combined)) return 'Сільпо';
+  if (/novus|новус/i.test(combined)) return 'Novus';
+  if (/фора|fora/i.test(combined)) return 'Фора';
+  if (/sinsay|синсей/i.test(combined)) return 'SINSAY';
+  if (/епіцентр|эпицентр|epicentr/i.test(combined)) return 'Епіцентр';
+  if (/eva|єва|prostor|простор/i.test(combined)) return 'EVA';
+  if (/ашан|auchan/i.test(combined)) return 'Ашан';
+  if (/metro|метро/i.test(combined)) return 'METRO';
+  if (/вигідна покупка|аврора|avrora/i.test(combined)) return 'Аврора';
+  if (/jysk|юск/i.test(combined)) return 'JYSK';
+  if (/mcdonald|макдоналд/i.test(combined)) return 'McDonald’s';
+  if (/kfc|кфс/i.test(combined)) return 'KFC';
+  if (/wog|вого/i.test(combined)) return 'WOG';
+  if (/okko|окко/i.test(combined)) return 'OKKO';
+  if (/upg|упг/i.test(combined)) return 'UPG';
+  if (/socar|сокар/i.test(combined)) return 'SOCAR';
+
+  if (/^продукти(?:-\d+)?$/i.test(storeName) && /атб/i.test(companyName)) {
+    return 'АТБ';
+  }
+
+  let clean = storeName || companyName || '';
+  clean = clean.replace(/(?:-\d+|\s+№\s*\d+|\s+\d+)$/, '').trim();
+  return clean;
+}
+
+/**
  * Универсально извлекает название магазина/бренда или юрлица из шапки чека.
  */
 function extractUniversalStoreName(rawLines) {
@@ -389,7 +422,7 @@ function extractUniversalStoreName(rawLines) {
     }
   }
 
-  return shop || company || '';
+  return normalizeBrandName(shop, company);
 }
 
 /**
@@ -423,9 +456,10 @@ function detectCategoryFromItems(items = [], storeName = '') {
  * Определяет название магазина и категорию по тексту описания, названию или товарам.
  */
 function detectMerchantInfo(hint = '', fn = '', items = []) {
-  const cat = detectCategoryFromItems(items, hint);
+  const norm = normalizeBrandName(hint);
+  const cat = detectCategoryFromItems(items, norm || hint);
   return {
-    name: hint.trim(),
+    name: norm || hint.trim(),
     category: cat,
   };
 }
@@ -436,7 +470,8 @@ function detectMerchantInfo(hint = '', fn = '', items = []) {
 function formatReceiptDescription(receipt, storeHint = '') {
   if (!receipt) return '';
 
-  const store = receipt.storeName || storeHint || '';
+  const rawStore = receipt.storeName || storeHint || '';
+  const store = normalizeBrandName(rawStore);
 
   // Если есть список распознанных товаров
   if (receipt.items && receipt.items.length > 0) {

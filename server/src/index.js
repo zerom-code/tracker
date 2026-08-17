@@ -192,23 +192,81 @@ async function route(req, res, url, origin) {
       }
 
       if (targetFn && targetId) {
-        const formattedDate = targetDate ? `${targetDate} ${targetTime || '00:00:00'}` : '';
-        const dpsApiUrl = `https://cabinet.tax.gov.ua/ws/api_public/rro/chkAllWeb?id=${encodeURIComponent(targetId)}&date=${encodeURIComponent(formattedDate)}&type=1&captcha=&fn=${encodeURIComponent(targetFn)}&sm=${encodeURIComponent(targetSm || '')}`;
+        let cleanId = String(targetId).trim();
+        let cleanTime = String(targetTime || '').trim();
+        if (cleanTime.length === 4) {
+          cleanTime = `${cleanTime.slice(0, 2)}:${cleanTime.slice(2, 4)}:00`;
+        } else if (cleanTime.length === 5) {
+          cleanTime = `${cleanTime}:00`;
+        } else if (cleanTime.length === 6 && !cleanTime.includes(':')) {
+          cleanTime = `${cleanTime.slice(0, 2)}:${cleanTime.slice(2, 4)}:${cleanTime.slice(4, 6)}`;
+        }
+
+        const idNoZeros = cleanId.replace(/^0+/, '');
+        const idPadded = cleanId.padStart(7, '0');
+        const idList = [...new Set([cleanId, idNoZeros, idPadded].filter(Boolean))];
+
+        const dateWithTime = targetDate ? `${targetDate} ${cleanTime || '00:00:00'}`.trim() : '';
+        const dateOnly = targetDate;
+        const dateList = [...new Set([dateWithTime, dateOnly].filter(Boolean))];
+
+        let decoded = null;
+        for (const currentId of idList) {
+          if (decoded) break;
+          for (const currentDate of dateList) {
+            const dpsApiUrl = `https://cabinet.tax.gov.ua/ws/api_public/rro/chkAllWeb?id=${encodeURIComponent(currentId)}&date=${encodeURIComponent(currentDate)}&type=1&captcha=&fn=${encodeURIComponent(targetFn)}&sm=${encodeURIComponent(targetSm || '')}`;
+            try {
+              const dpsRes = await fetch(dpsApiUrl, {
+                headers: { 'Accept': 'application/json, text/plain, */*' }
+              });
+              if (dpsRes.ok) {
+                const data = await dpsRes.json();
+                if (data && data.check) {
+                  decoded = Buffer.from(data.check, 'base64').toString('utf8');
+                  break;
+                }
+              }
+            } catch (e) {}
+          }
+        }
         
-        const dpsRes = await fetch(dpsApiUrl, {
-          headers: { 'Accept': 'application/json, text/plain, */*' }
-        });
-        
-        if (dpsRes.ok) {
-          const data = await dpsRes.json();
-          if (data && data.check) {
-            const decoded = Buffer.from(data.check, 'base64').toString('utf8');
+        if (decoded) {
             function cleanProductName(name) {
               if (!name || typeof name !== 'string') return '';
               let cleaned = name.trim().replace(/\s+/g, ' ');
               cleaned = cleaned.replace(/([A-ZА-ЯІЇЄҐ])([A-ZА-ЯІЇЄҐ][a-zа-яіїєґ])/g, '$1 $2');
               cleaned = cleaned.replace(/([a-zа-яіїєґ0-9])([A-ZА-ЯІЇЄҐ])/g, '$1 $2');
               return cleaned.replace(/\s+/g, ' ').trim();
+            }
+
+            function normalizeBrandName(storeName, companyName = '') {
+              const combined = (storeName + ' ' + companyName).trim();
+              if (/varus|варус/i.test(combined)) return 'VARUS';
+              if (/атб|atb/i.test(combined)) return 'АТБ';
+              if (/сільпо|сильпо|silpo/i.test(combined)) return 'Сільпо';
+              if (/novus|новус/i.test(combined)) return 'Novus';
+              if (/фора|fora/i.test(combined)) return 'Фора';
+              if (/sinsay|синсей/i.test(combined)) return 'SINSAY';
+              if (/епіцентр|эпицентр|epicentr/i.test(combined)) return 'Епіцентр';
+              if (/eva|єва|prostor|простор/i.test(combined)) return 'EVA';
+              if (/ашан|auchan/i.test(combined)) return 'Ашан';
+              if (/metro|метро/i.test(combined)) return 'METRO';
+              if (/вигідна покупка|аврора|avrora/i.test(combined)) return 'Аврора';
+              if (/jysk|юск/i.test(combined)) return 'JYSK';
+              if (/mcdonald|макдоналд/i.test(combined)) return 'McDonald’s';
+              if (/kfc|кфс/i.test(combined)) return 'KFC';
+              if (/wog|вого/i.test(combined)) return 'WOG';
+              if (/okko|окко/i.test(combined)) return 'OKKO';
+              if (/upg|упг/i.test(combined)) return 'UPG';
+              if (/socar|сокар/i.test(combined)) return 'SOCAR';
+
+              if (/^продукти(?:-\d+)?$/i.test(storeName) && /атб/i.test(companyName)) {
+                return 'АТБ';
+              }
+
+              let clean = storeName || companyName || '';
+              clean = clean.replace(/(?:-\d+|\s+№\s*\d+|\s+\d+)$/, '').trim();
+              return clean;
             }
 
             function extractUniversalStoreName(rawLines) {
@@ -236,7 +294,7 @@ async function route(req, res, url, origin) {
                 }
               }
 
-              return shop || company || '';
+              return normalizeBrandName(shop, company);
             }
 
             const items = [];
