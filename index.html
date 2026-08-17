@@ -34,11 +34,23 @@
 <div id="modal-root"></div>
 <div id="toast" class="toast" hidden></div>
 
-<script src="js/store.js"></script>
-<script src="js/api.js"></script>
-<script src="js/sync.js"></script>
-<script src="js/qr.js"></script>
-<script src="js/receipts.js"></script>
-<script src="js/app.js"></script>
+<script>
+window.onerror = function(msg, url, lineNo) {
+  var el = document.getElementById('screen');
+  if (el && !el.innerHTML.trim()) {
+    el.innerHTML = '<div style="padding:60px 20px;text-align:center;color:#fff;">' +
+      '<h2 style="margin-bottom:12px;font-size:22px">Обновление трекера</h2>' +
+      '<p style="color:#8e9aa8;margin-bottom:24px;font-size:15px;line-height:1.4">Кэш приложения обновляется до новой версии.<br>Нажмите кнопку ниже:</p>' +
+      '<button onclick="if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(r){for(var i=0;i<r.length;i++)r[i].unregister();location.reload(true);});}else{location.reload(true);}" style="background:#4da3ff;color:#fff;border:none;padding:14px 28px;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(77,163,255,0.4)">🔄 Обновить приложение</button>' +
+      '</div>';
+  }
+};
+</script>
+<script src="js/store.js?v=41"></script>
+<script src="js/api.js?v=41"></script>
+<script src="js/sync.js?v=41"></script>
+<script src="js/qr.js?v=41"></script>
+<script src="js/receipts.js?v=41"></script>
+<script src="js/app.js?v=41"></script>
 </body>
 </html>
