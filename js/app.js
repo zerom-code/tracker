@@ -610,7 +610,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 36</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 37</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -2070,7 +2070,7 @@ document.addEventListener('click', async (e) => {
         const amount = r.amount || (ui.tempTxForm && ui.tempTxForm.amount) || 0;
         const date = r.date || (ui.tempTxForm && ui.tempTxForm.date) || todayISO();
         const merchant = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(r.storeName || storeHint, r.fn) : null;
-        const categoryId = (merchant && merchant.category) || (ui.tempTxForm && ui.tempTxForm.categoryId) || 'products';
+        const categoryId = (merchant && merchant.category) || (ui.tempTxForm && ui.tempTxForm.categoryId) || 'groceries';
         const receiptUrl = r.rawUrl || (ui.tempTxForm && ui.tempTxForm.receiptUrl) || '';
         const type = (ui.tempTxForm && ui.tempTxForm.type) || 'expense';
         const currency = (ui.tempTxForm && ui.tempTxForm.currency) || 'UAH';

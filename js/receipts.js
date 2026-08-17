@@ -331,31 +331,31 @@ async function fetchReceiptDetails(receipt) {
 }
 
 const KNOWN_FN_PATTERNS = [
-  { pattern: /^300079|^300080|^300081|^300082/i, name: 'VARUS', category: 'products' }, // ТОВ "ОМЕГА" / VARUS
-  { pattern: /^300122|^300022|^300123|^300023|^300124/i, name: 'АТБ', category: 'products' }, // ТОВ "АТБ-Маркет"
-  { pattern: /^300055|^300056|^300057|^300058/i, name: 'Сільпо', category: 'products' }, // ТОВ "Сільпо-Фуд"
-  { pattern: /^300071|^300072/i, name: 'Фора', category: 'products' },
-  { pattern: /^300061|^300062/i, name: 'Novus', category: 'products' },
+  { pattern: /^300079|^300080|^300081|^300082/i, name: 'VARUS', category: 'groceries' }, // ТОВ "ОМЕГА" / VARUS
+  { pattern: /^300122|^300022|^300123|^300023|^300124/i, name: 'АТБ', category: 'groceries' }, // ТОВ "АТБ-Маркет"
+  { pattern: /^300055|^300056|^300057|^300058/i, name: 'Сільпо', category: 'groceries' }, // ТОВ "Сільпо-Фуд"
+  { pattern: /^300071|^300072/i, name: 'Фора', category: 'groceries' },
+  { pattern: /^300061|^300062/i, name: 'Novus', category: 'groceries' },
   { pattern: /^300091|^300092/i, name: 'Епіцентр', category: 'home' },
   { pattern: /^300045|^300046/i, name: 'EVA', category: 'health' },
-  { pattern: /^300031|^300032/i, name: 'WOG', category: 'car' },
-  { pattern: /^300035|^300036/i, name: 'OKKO', category: 'car' },
+  { pattern: /^300031|^300032/i, name: 'WOG', category: 'transport' },
+  { pattern: /^300035|^300036/i, name: 'OKKO', category: 'transport' },
 ];
 
 const KNOWN_MERCHANTS = [
-  { keywords: [/varus|варус/i, /омега/i], name: 'VARUS', category: 'products' },
-  { keywords: [/атб|atb/i], name: 'АТБ', category: 'products' },
-  { keywords: [/сільпо|сильпо|silpo/i, /фоззі|fozzy/i], name: 'Сільпо', category: 'products' },
-  { keywords: [/фора|fora/i], name: 'Фора', category: 'products' },
-  { keywords: [/novus|новус/i], name: 'Novus', category: 'products' },
-  { keywords: [/ашан|auchan/i], name: 'Ашан', category: 'products' },
-  { keywords: [/metro|метро/i], name: 'METRO', category: 'products' },
+  { keywords: [/varus|варус/i, /омега/i], name: 'VARUS', category: 'groceries' },
+  { keywords: [/атб|atb/i], name: 'АТБ', category: 'groceries' },
+  { keywords: [/сільпо|сильпо|silpo/i, /фоззі|fozzy/i], name: 'Сільпо', category: 'groceries' },
+  { keywords: [/фора|fora/i], name: 'Фора', category: 'groceries' },
+  { keywords: [/novus|новус/i], name: 'Novus', category: 'groceries' },
+  { keywords: [/ашан|auchan/i], name: 'Ашан', category: 'groceries' },
+  { keywords: [/metro|метро/i], name: 'METRO', category: 'groceries' },
   { keywords: [/епіцентр|эпицентр|epicentr/i], name: 'Епіцентр', category: 'home' },
   { keywords: [/eva|єва/i, /prostor|простор/i], name: 'EVA', category: 'health' },
-  { keywords: [/wog|вого/i], name: 'WOG', category: 'car' },
-  { keywords: [/okko|окко/i], name: 'OKKO', category: 'car' },
-  { keywords: [/socar|сокар/i], name: 'SOCAR', category: 'car' },
-  { keywords: [/upg|упг/i], name: 'UPG', category: 'car' },
+  { keywords: [/wog|вого/i], name: 'WOG', category: 'transport' },
+  { keywords: [/okko|окко/i], name: 'OKKO', category: 'transport' },
+  { keywords: [/socar|сокар/i], name: 'SOCAR', category: 'transport' },
+  { keywords: [/upg|упг/i], name: 'UPG', category: 'transport' },
   { keywords: [/аптека|анц|бажаємо здоров|подорожник|віталюкс|911|фарм/i], name: 'Аптека', category: 'health' },
   { keywords: [/mcdonald|макдоналд|кфс|kfc/i], name: 'McDonald’s', category: 'cafe' },
   { keywords: [/rozetka|розетка/i], name: 'Rozetka', category: 'other' },
@@ -388,12 +388,12 @@ function detectMerchantInfo(hint, fn = '') {
       }
     }
     if (text && text !== 'Чек по QR' && !text.startsWith('Чек №')) {
-      return { name: text.slice(0, 30), category: 'products' };
+      return { name: text.slice(0, 30), category: 'groceries' };
     }
   }
 
   // По умолчанию фискальные чеки из магазинов — это продукты
-  return { name: '', category: 'products' };
+  return { name: '', category: 'groceries' };
 }
 
 /**
