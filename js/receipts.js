@@ -482,11 +482,12 @@ function formatReceiptDescription(receipt, storeHint = '') {
     return store ? `${store} (${shown}${more})` : `${shown}${more}`;
   }
 
-  // Если есть номер чека
+  // Если товаров нет — красивое чистое название магазина (или номер если вообще нет названия)
+  if (store) return store;
   if (receipt.id) {
     const checkNum = String(receipt.id).replace(/^0+/, '') || receipt.id;
-    return store ? `${store} (Чек № ${checkNum})` : `Чек № ${checkNum}`;
+    return `Чек № ${checkNum}`;
   }
 
-  return store ? `${store}` : 'Чек по QR';
+  return 'Чек по QR';
 }

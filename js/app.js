@@ -610,7 +610,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 39</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 40</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -924,6 +924,12 @@ function openTxForm(tx) {
           <a href="${esc(t.receiptUrl || '')}" id="tx-receipt-link" target="_blank" rel="noopener" class="receipt-link-btn" ${t.receiptUrl ? '' : 'style="display:none"'}>Открыть оригинал ↗</a>
           <button type="button" class="receipt-del-btn" data-action="remove-tx-receipt" title="Открепить чек">✕</button>
         </div>
+        ${t.receiptUrl && (!t.receiptItems || !t.receiptItems.length) ? `
+          <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px dashed var(--border)">
+            <span style="font-size:12px;color:var(--muted)">Товары не загружены</span>
+            <button type="button" class="btn-link-action" data-action="reload-tx-receipt-items" style="color:var(--accent);font-size:12px;font-weight:600">🔄 Загрузить товары из ДПС</button>
+          </div>
+        ` : ''}
         ${t.receiptItems && t.receiptItems.length ? `
           <div class="field" id="tx-receipt-items-container" style="margin-top:8px">
             <label style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);margin-bottom:4px">
@@ -2131,7 +2137,46 @@ document.addEventListener('click', async (e) => {
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
         closeSheet();
         openTxForm(ui.tempTxForm);
-        toast('Описание чека добавлено ✨');
+    case 'reload-tx-receipt-items': {
+      const receiptUrl = document.getElementById('tx-receipt-url') ? document.getElementById('tx-receipt-url').value : '';
+      if (!receiptUrl) { toast('Ссылка на чек отсутствует'); break; }
+      toast('Запрашиваем товары с сервера ДПС…');
+      try {
+        const parsed = parseReceiptQr(receiptUrl);
+        const detailed = await fetchReceiptDetails(parsed);
+        if (detailed && detailed.items && detailed.items.length) {
+          const form = document.getElementById('sheet-form');
+          const txId = form ? form.dataset.id : null;
+          const store = detailed.storeName || '';
+          const newDesc = formatReceiptDescription(detailed);
+          if (txId) {
+            const t = state.transactions.find((x) => x.id === txId);
+            if (t) {
+              t.receiptItems = detailed.items;
+              if (!t.description || t.description.includes('Чек №') || t.description === store) {
+                t.description = newDesc;
+              }
+              save();
+            }
+          }
+          if (ui.tempTxForm) {
+            ui.tempTxForm.receiptItems = detailed.items;
+            if (!ui.tempTxForm.description || ui.tempTxForm.description.includes('Чек №') || ui.tempTxForm.description === store) {
+              ui.tempTxForm.description = newDesc;
+            }
+          }
+          const currentT = captureCurrentTxForm();
+          currentT.receiptItems = detailed.items;
+          if (!currentT.description || currentT.description.includes('Чек №') || currentT.description === store) {
+            currentT.description = newDesc;
+          }
+          openTxForm(currentT);
+          toast('Товары из чека успешно загружены ✨');
+        } else {
+          toast('Касса ещё передаёт данные на сервер ДПС. Попробуйте через 10–15 минут.');
+        }
+      } catch (err) {
+        toast('Ошибка при загрузке: ' + err.message);
       }
       break;
     }
