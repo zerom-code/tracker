@@ -954,7 +954,7 @@ input[type="checkbox"]:checked::after {
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text);
 }
 .ai-input-bar input:focus {
