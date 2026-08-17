@@ -671,7 +671,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 46</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 47</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -2083,6 +2083,7 @@ function importDataFile(file) {
    иначе системный пикер даты успеет открыться. */
 let pressTarget = null;
 document.addEventListener('pointerdown', (e) => { pressTarget = e.target; }, true);
+document.addEventListener('pointercancel', () => { pressTarget = null; }, true);
 document.addEventListener('click', (e) => {
   const pressed = pressTarget;
   pressTarget = null;
@@ -2754,12 +2755,4 @@ if ('serviceWorker' in navigator &&
   navigator.serviceWorker.register('sw.js').then((reg) => {
     reg.update().catch(() => {});
   }).catch(() => {});
-
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!refreshing) {
-      refreshing = true;
-      window.location.reload();
-    }
-  });
 }
