@@ -2212,9 +2212,8 @@ document.addEventListener('click', async (e) => {
     const r = ui.pendingReceipt;
     if (r) {
       r.storeName = newStore;
-      const checkNum = String(r.id || '').replace(/^0+/, '') || r.id;
       if (descInput) {
-        descInput.value = checkNum ? `${newStore} (Чек № ${checkNum})` : newStore;
+        descInput.value = newStore;
       }
     }
     return;
