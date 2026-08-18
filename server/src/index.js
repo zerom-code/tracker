@@ -241,6 +241,7 @@ async function route(req, res, url, origin) {
 
             function normalizeBrandName(storeName, companyName = '') {
               const combined = (storeName + ' ' + companyName).trim();
+              if (/нова\s*пошта|новапошта|novapay|нова\s*пей|новапей/i.test(combined)) return 'Нова пошта';
               if (/varus|варус/i.test(combined)) return 'VARUS';
               if (/атб|atb/i.test(combined)) return 'АТБ';
               if (/сільпо|сильпо|silpo/i.test(combined)) return 'Сільпо';
@@ -301,19 +302,47 @@ async function route(req, res, url, origin) {
             const lines = decoded.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
             const storeName = extractUniversalStoreName(lines);
             let currentItem = null;
+            let pendingCalc = null;
 
             for (let i = 0; i < lines.length; i++) {
               const line = lines[i];
 
               // Конец товарной части чека (итоги)
-              if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА|КАРТКА|ПДВ|ДИСКОНТ|Скидка|ЧЕК:|Контрольне число|ФІСКАЛЬНИЙ ЧЕК)/i)) {
+              if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА|КАРТКА|ПДВ|ДИСКОНТ|Скидка|ЧЕК:|Контрольне число|ФІСКАЛЬНИЙ ЧЕК|ЗН\s+|ПЛАТНИК|ОТРИМУВАЧ)/i)) {
                 if (currentItem) {
                   items.push(currentItem);
                   currentItem = null;
                 }
-                if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА)/i)) {
+                if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА)/i)) {
                   break;
                 }
+              }
+
+              // АТБ формат: строка множителя "2 0.064 X 139.89" или "2 2 X 177.90" перед названием товара
+              const atbPreCalcMatch = line.match(/^\d+\s+(\d+[.,]?\d*)\s*[xх*×]\s*(\d+[.,]?\d*)$/i);
+              if (atbPreCalcMatch) {
+                if (currentItem) { items.push(currentItem); currentItem = null; }
+                pendingCalc = {
+                  quantity: parseFloat(atbPreCalcMatch[1].replace(',', '.')),
+                  price: parseFloat(atbPreCalcMatch[2].replace(',', '.')),
+                };
+                continue;
+              }
+
+              // АТБ формат: однострочная позиция "1 Название товара ... 186.70 А" или "1 Пакет 4.50 А"
+              const atbLineMatch = line.match(/^(\d+)\s+(.+?)\s+(\d+[.,]\d{2})\s+[А-ЯA-Z]$/);
+              if (atbLineMatch) {
+                if (currentItem) { items.push(currentItem); currentItem = null; }
+                const name = cleanProductName(atbLineMatch[2]);
+                const total = parseFloat(atbLineMatch[3].replace(',', '.'));
+                items.push({
+                  name,
+                  quantity: 1,
+                  price: total,
+                  total,
+                });
+                pendingCalc = null;
+                continue;
               }
 
               // 1. Поиск строки расчёта с любыми единицами измерения: "1.000 шт x 12.00 = 12.00 А"
@@ -329,7 +358,7 @@ async function route(req, res, url, origin) {
                 continue;
               }
 
-              // 2. Строка с ценой/суммой: "= 12.00" или "12.00 А"
+              // 2. Строка с ценой/суммой: "= 12.00" или "12.00 А" или "178.85 Б"
               const singlePriceMatch = line.match(/=\s*(\d+[.,]\d{2})\s*[а-яa-z]?$/i) || line.match(/^(\d+[.,]\d{2})\s*[А-ЯA-Z]$/);
               if (singlePriceMatch && currentItem) {
                 currentItem.total = parseFloat(singlePriceMatch[1].replace(',', '.'));
@@ -352,8 +381,36 @@ async function route(req, res, url, origin) {
                 continue;
               }
 
-              // 4. Дополнение многострочного названия товара
-              if (currentItem && !line.match(/^(?:Дисконт|Знижка|Штрих|ПДВ|Код)/i) && !line.startsWith('-') && !line.startsWith('=')) {
+              // 4. Позиция после штрих-кода в АТБ с ценой в конце: "Часник імпорт 1 гат 8.95 А"
+              const atbSubItemMatch = line.match(/^(.+?)\s+(\d+[.,]\d{2})\s+[А-ЯA-Z]$/);
+              if (atbSubItemMatch && !line.startsWith('-') && !line.startsWith('=')) {
+                if (currentItem) { items.push(currentItem); currentItem = null; }
+                const name = cleanProductName(atbSubItemMatch[1]);
+                const total = parseFloat(atbSubItemMatch[2].replace(',', '.'));
+                items.push({
+                  name,
+                  quantity: pendingCalc ? pendingCalc.quantity : 1,
+                  price: pendingCalc ? pendingCalc.price : total,
+                  total,
+                });
+                pendingCalc = null;
+                continue;
+              }
+
+              // 5. NovaPay / Новая почта: "Переказ коштів за послуги ТОВ "Нова пошта"..."
+              if (/переказ коштів за послуги/i.test(line)) {
+                if (currentItem) { items.push(currentItem); currentItem = null; }
+                currentItem = {
+                  name: 'Послуги Нова пошта (Доставка)',
+                  quantity: 1,
+                  price: 0,
+                  total: 0,
+                };
+                continue;
+              }
+
+              // 6. Дополнение многострочного названия товара
+              if (currentItem && !line.match(/^(?:Дисконт|Знижка|Штрих|ПДВ|Код|Ідент|Термінал|Комісія|Платіжна|Вид|ЕПЗ|RRN|СУМА)/i) && !line.startsWith('-') && !line.startsWith('=')) {
                 currentItem.name = cleanProductName(currentItem.name + ' ' + line);
               }
             }

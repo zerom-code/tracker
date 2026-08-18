@@ -229,7 +229,12 @@ function isOutflow(t) {
    банка на момент операции, берём его: пересчёт по сегодняшнему курсу дал бы
    другую цифру, хотя потрачена была именно эта сумма. */
 function txBase(t) {
-  if (t.altAmount && t.altCurrency === state.settings.baseCurrency) return t.altAmount;
+  if (t.altAmount && t.altCurrency === state.settings.baseCurrency) {
+    const expected = toBase(t.amount, t.currency);
+    if (expected > 0 && Math.abs(t.altAmount - expected) / expected < 0.5) {
+      return t.altAmount;
+    }
+  }
   return toBase(t.amount, t.currency);
 }
 

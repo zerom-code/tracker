@@ -198,32 +198,68 @@ function parseReceiptText(txt) {
   let fn = '';
   let id = '';
   let currentItem = null;
+  let pendingCalc = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    const smMatch = line.match(/(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО)[\s:]+(\d+[.,]\d{2})/i);
-    if (smMatch) totalSm = parseFloat(smMatch[1].replace(',', '.'));
+    // Сумма чека
+    const smMatch = line.match(/(?:СУМА ДО СПЛАТИ|СУМА|СУМА:\s*|ВСЬОГО|ИТОГО|БЕЗГОТІВКОВА|РАЗОМ)[\s:]+(\d+[.,]\d{2})(?:\s*(?:ГРН|UAH|Б|А|В|Г))?/i);
+    if (smMatch && totalSm === null) {
+      totalSm = parseFloat(smMatch[1].replace(',', '.'));
+    }
 
+    // Дата и время (ДД.ММ.ГГГГ ЧЧ:ММ:СС или ДД-ММ-ГГГГ)
     const dtMatch = line.match(/(\d{2})[-.](\d{2})[-.](\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)/);
-    if (dtMatch) {
+    if (dtMatch && !date) {
       date = `${dtMatch[3]}-${dtMatch[2]}-${dtMatch[1]}`;
       time = dtMatch[4];
     }
-    const fnM = line.match(/(?:РРО\s+)?ФН\s*(\d{8,12})/i);
-    if (fnM) fn = fnM[1];
-    const idM = line.match(/ЧЕК\s+(?:ФН\s+)?(?:№\s*)?(\d+)/i);
-    if (idM) id = idM[1];
 
-    // Конец товарной части чека (итоги)
-    if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА|КАРТКА|ПДВ|ДИСКОНТ|Скидка|ЧЕК:|Контрольне число|ФІСКАЛЬНИЙ ЧЕК)/i)) {
+    // Фискальный номер кассы/ПРРО
+    const fnM = line.match(/(?:РРО\s+)?(?:ПРРО\s+)?ФН\s*(\d{8,12})/i);
+    if (fnM && !fn) fn = fnM[1];
+
+    // Номер чека (Чек № 001292789 или Чек 2574394 или ЧЕК ФН ...)
+    const idM = line.match(/ЧЕК\s+(?:ФН\s+)?(?:№\s*)?(\d+)/i) || line.match(/ЧЕК\s+(\d+)/i);
+    if (idM && !id) id = idM[1];
+
+    // Конец товарной части чека (итоги / подвал)
+    if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА|КАРТКА|ПДВ|ДИСКОНТ|Скидка|ЧЕК:|Контрольне число|ФІСКАЛЬНИЙ ЧЕК|ЗН\s+|ПЛАТНИК|ОТРИМУВАЧ)/i)) {
       if (currentItem) {
         items.push(currentItem);
         currentItem = null;
       }
-      if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА)/i)) {
-        break;
+      if (line.match(/^(?:СУМА ДО СПЛАТИ|СУМА|ВСЬОГО|ИТОГО|РАЗОМ|ГОТІВКА|БЕЗГОТІВКА)/i)) {
+        // продолжаем извлекать метаданные даты и ФН ниже
       }
+    }
+
+    // АТБ формат: строка множителя "2 0.064 X 139.89" или "2 2 X 177.90" перед названием товара
+    const atbPreCalcMatch = line.match(/^\d+\s+(\d+[.,]?\d*)\s*[xх*×]\s*(\d+[.,]?\d*)$/i);
+    if (atbPreCalcMatch) {
+      if (currentItem) { items.push(currentItem); currentItem = null; }
+      pendingCalc = {
+        quantity: parseFloat(atbPreCalcMatch[1].replace(',', '.')),
+        price: parseFloat(atbPreCalcMatch[2].replace(',', '.')),
+      };
+      continue;
+    }
+
+    // АТБ формат: однострочная позиция "1 Название товара ... 186.70 А" или "1 Пакет 4.50 А"
+    const atbLineMatch = line.match(/^(\d+)\s+(.+?)\s+(\d+[.,]\d{2})\s+[А-ЯA-Z]$/);
+    if (atbLineMatch) {
+      if (currentItem) { items.push(currentItem); currentItem = null; }
+      const name = cleanProductName(atbLineMatch[2]);
+      const total = parseFloat(atbLineMatch[3].replace(',', '.'));
+      items.push({
+        name,
+        quantity: 1,
+        price: total,
+        total,
+      });
+      pendingCalc = null;
+      continue;
     }
 
     // 1. Поиск строки расчёта с любыми единицами измерения: "1.000 шт x 12.00 = 12.00 А"
@@ -239,7 +275,7 @@ function parseReceiptText(txt) {
       continue;
     }
 
-    // 2. Строка с ценой/суммой: "= 12.00" или "12.00 А"
+    // 2. Строка с ценой/суммой: "= 12.00" или "12.00 А" или "178.85 Б"
     const singlePriceMatch = line.match(/=\s*(\d+[.,]\d{2})\s*[а-яa-z]?$/i) || line.match(/^(\d+[.,]\d{2})\s*[А-ЯA-Z]$/);
     if (singlePriceMatch && currentItem) {
       currentItem.total = parseFloat(singlePriceMatch[1].replace(',', '.'));
@@ -249,7 +285,7 @@ function parseReceiptText(txt) {
       continue;
     }
 
-    // 3. Начало новой позиции
+    // 3. Начало новой позиции по "АРТ. №" или "1. Название"
     const artMatch = line.match(/^АРТ\.?\s*№?\s*\d*\s+(.+)$/i) || line.match(/^\d+\.\s+(.+)$/i);
     if (artMatch) {
       if (currentItem) items.push(currentItem);
@@ -262,26 +298,56 @@ function parseReceiptText(txt) {
       continue;
     }
 
-    // 4. Дополнение многострочного названия товара
-    if (currentItem && !line.match(/^(?:Дисконт|Знижка|Штрих|ПДВ|Код)/i) && !line.startsWith('-') && !line.startsWith('=')) {
+    // 4. Позиция после штрих-кода в АТБ с ценой в конце: "Часник імпорт 1 гат 8.95 А" или "Пельмені ... 355.80 А"
+    const atbSubItemMatch = line.match(/^(.+?)\s+(\d+[.,]\d{2})\s+[А-ЯA-Z]$/);
+    if (atbSubItemMatch && !line.startsWith('-') && !line.startsWith('=')) {
+      if (currentItem) { items.push(currentItem); currentItem = null; }
+      const name = cleanProductName(atbSubItemMatch[1]);
+      const total = parseFloat(atbSubItemMatch[2].replace(',', '.'));
+      items.push({
+        name,
+        quantity: pendingCalc ? pendingCalc.quantity : 1,
+        price: pendingCalc ? pendingCalc.price : total,
+        total,
+      });
+      pendingCalc = null;
+      continue;
+    }
+
+    // 5. NovaPay / Новая почта: "Переказ коштів за послуги ТОВ "Нова пошта"..."
+    if (/переказ коштів за послуги/i.test(line)) {
+      if (currentItem) { items.push(currentItem); currentItem = null; }
+      currentItem = {
+        name: 'Послуги Нова пошта (Доставка)',
+        quantity: 1,
+        price: 0,
+        total: 0,
+      };
+      continue;
+    }
+
+    // 6. Дополнение многострочного названия товара
+    if (currentItem && !line.match(/^(?:Дисконт|Знижка|Штрих|ПДВ|Код|Ідент|Термінал|Комісія|Платіжна|Вид|ЕПЗ|RRN|СУМА)/i) && !line.startsWith('-') && !line.startsWith('=')) {
       currentItem.name = cleanProductName(currentItem.name + ' ' + line);
     }
   }
 
   if (currentItem) items.push(currentItem);
-  if (!items.length) return null;
 
-  const detected = typeof detectMerchantInfo === 'function' ? detectMerchantInfo('', fn) : { name: '', category: null };
+  // Извлечение названия магазина из шапки
+  const storeName = extractUniversalStoreName(lines);
+  const detected = typeof detectMerchantInfo === 'function' ? detectMerchantInfo(storeName, fn, items) : { name: storeName, category: null };
+
   return {
     type: 'tax_gov_text',
-    typeName: 'ДПС Текст',
+    typeName: 'Касовий чек',
     rawUrl: '',
     fn,
     id,
     amount: totalSm,
     date,
     time,
-    storeName: detected.name || '',
+    storeName: detected.name || storeName || '',
     items,
   };
 }
@@ -365,6 +431,7 @@ async function fetchReceiptDetails(receipt) {
  */
 function normalizeBrandName(storeName = '', companyName = '') {
   const combined = (storeName + ' ' + companyName).trim();
+  if (/нова\s*пошта|новапошта|novapay|нова\s*пей|новапей/i.test(combined)) return 'Нова пошта';
   if (/varus|варус/i.test(combined)) return 'VARUS';
   if (/атб|atb/i.test(combined)) return 'АТБ';
   if (/сільпо|сильпо|silpo/i.test(combined)) return 'Сільпо';
@@ -431,13 +498,17 @@ function extractUniversalStoreName(rawLines) {
 function detectCategoryFromItems(items = [], storeName = '') {
   const text = (storeName + ' ' + (items || []).map((i) => i.name).join(' ')).toLowerCase();
 
+  // Новая почта / доставка / почтовые переводы
+  if (/нова\s*пошта|novapay|новапей|поштовий\s*переказ|доставка|пошта|meest|міст\s*експрес|укрпошта/i.test(text)) {
+    return 'transport';
+  }
   if (/кепка|штани|светр|куртка|футболка|джинси|сорочка|сукня|шорти|шкарпетки|білизна|плаття|взуття|одяг|sinsay|zara|h&m|reserved|cropp|house|stradivarius|pull&bear|bershka|lc waikiki/i.test(text)) {
     return 'clothes';
   }
   if (/ліки|таблетк|мазь|краплі|спрей|пластир|вітамін|шприц|бинт|аптек|анц|подорожник|бажаємо здоров|eva|єва|prostor|простор|косметик/i.test(text)) {
     return 'health';
   }
-  if (/паливо|бензин|дизель|газ\s+lpg|wog|okko|upg|socar|авто|миття|паркув/i.test(text)) {
+  if (/паливо|бензин|дизель|газ\s+lpg|wog|okko|upg|socar|авто|миття|паркув|таксі|uber|bolt|уклон/i.test(text)) {
     return 'transport';
   }
   if (/піца|бургер|кава|чай|еспресо|капучино|латте|шаурма|суші|рол|ресторан|кафе|mcdonald|kfc/i.test(text)) {

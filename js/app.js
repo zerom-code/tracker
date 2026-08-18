@@ -95,14 +95,14 @@ function renderHome() {
   const oweMe = moneyBoth(activeDebts('owe-me').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
   const iOwe = moneyBoth(activeDebts('i-owe').reduce((a, d) => a + toBase(debtRemaining(d), d.currency), 0));
 
-  // топ категорий месяца; переводы идут отдельной строкой, чтобы сумма
-  // столбиков сходилась с итогом расходов
+  // топ категорий месяца
   const byCat = {};
   for (const t of txOfMonth(y, m, 'expense')) {
     const id = t.categoryId || FALLBACK_CATEGORY;
     byCat[id] = (byCat[id] || 0) + txBase(t);
   }
-  if (transfersBase > 0) byCat[TRANSFERS_ROW] = transfersBase;
+  // Категория «Переводы» отключена
+  // if (transfersBase > 0) byCat[TRANSFERS_ROW] = transfersBase;
   const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 7);
   const maxCat = cats.length ? cats[0][1] : 1;
 
@@ -128,22 +128,22 @@ function renderHome() {
     </div>
 
     <div class="stat-grid" style="margin-bottom:12px">
-      <div class="card">
-        <div class="stat-label">Платежи в месяц</div>
+      <div class="card stat-card-interactive" data-action="nav-subs" role="button" tabindex="0" title="Перейти к платежам и рассрочкам">
+        <div class="stat-label">Платежи в месяц ›</div>
         <div class="stat-value">${subs.main}</div>
         <div class="row-sub">${creditsLeft > 0 ? 'выплатить ещё ' + fmtMoney(creditsLeft, state.settings.baseCurrency) : '≈ ' + subs.other}</div>
       </div>
-      <div class="card">
-        <div class="stat-label">Курс доллара</div>
+      <div class="card stat-card-interactive" data-action="refresh-rate-home" role="button" tabindex="0" title="Нажмите для обновления курса">
+        <div class="stat-label">Курс доллара 🔄</div>
         <div class="stat-value">${effectiveRate() ? effectiveRate().toFixed(2) + ' ₴' : '—'}</div>
         <div class="row-sub">${state.settings.manualRate ? 'ручной курс' : esc(state.rate.source)}</div>
       </div>
-      <div class="card">
-        <div class="stat-label">Мне должны</div>
+      <div class="card stat-card-interactive" data-action="nav-debts" role="button" tabindex="0" title="Перейти к долгам">
+        <div class="stat-label">Мне должны ›</div>
         <div class="stat-value green">${oweMe.main}</div>
       </div>
-      <div class="card">
-        <div class="stat-label">Я должен</div>
+      <div class="card stat-card-interactive" data-action="nav-debts" role="button" tabindex="0" title="Перейти к долгам">
+        <div class="stat-label">Я должен ›</div>
         <div class="stat-value red">${iOwe.main}</div>
       </div>
     </div>
@@ -156,14 +156,8 @@ function renderHome() {
         </div>
         <span class="ai-card-badge">${esc(state.settings.openaiModel || 'GPT 5.6 Luna')}</span>
       </div>
-      <div class="ai-card-sub">
+      <div class="ai-card-sub" style="margin-bottom:10px">
         Задайте вопрос по тратам, товарам из чеков и оптимизации бюджета.
-      </div>
-      <div class="ai-quick-grid">
-        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="На какие продукты я потратил больше всего денег?">🛒 Топ продуктов</button>
-        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="Проанализируй мои расходы за этот месяц и найди аномалии">📊 Анализ за месяц</button>
-        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="Где я могу сэкономить и оптимизировать траты?">💡 Где сэкономить?</button>
-        <button type="button" class="ai-quick-chip" data-action="ai-quick-prompt" data-prompt="Сколько я потратил на сладости, кофе и перекусы?">☕ Сладости и кофе</button>
       </div>
       <button type="button" class="btn secondary" data-action="open-ai-chat" style="padding:10px;font-size:14px;width:100%">💬 Спросить у ИИ</button>
     </div>
@@ -206,13 +200,15 @@ function renderHome() {
 
 function renderOps() {
   const { opsY: y, opsM: m, opsCategory } = ui;
-  // «Расходы» показывают и переводы — они тоже расход, просто отдельного вида.
-  // Переводы между своими не считаются нигде и видны в «Все» и «Переводы».
+  // Переводы между своими картами полностью исключаются из логов операций
   const matchesFilter = (t) => {
+    // Внутренние переводы между личными картами скрыты из списка
+    if (t.internal) return false;
+
     let typeOk = true;
     if (ui.opsFilter === 'all') typeOk = true;
-    else if (t.internal) typeOk = ui.opsFilter === 'transfer';
-    else typeOk = ui.opsFilter === 'expense' ? isOutflow(t) : t.type === ui.opsFilter;
+    else if (ui.opsFilter === 'expense') typeOk = isOutflow(t);
+    else typeOk = t.type === ui.opsFilter;
     if (!typeOk) return false;
 
     if (opsCategory) {
@@ -254,7 +250,8 @@ function renderOps() {
     <div class="segmented seg-tight" style="margin-bottom:10px">
       <button data-action="ops-filter" data-val="all" class="${ui.opsFilter === 'all' ? 'active' : ''}">Все</button>
       <button data-action="ops-filter" data-val="expense" class="${ui.opsFilter === 'expense' ? 'active' : ''}">Расходы</button>
-      <button data-action="ops-filter" data-val="transfer" class="${ui.opsFilter === 'transfer' ? 'active' : ''}">Переводы</button>
+      <!-- Категория Переводы отключена -->
+      <!-- <button data-action="ops-filter" data-val="transfer" class="${ui.opsFilter === 'transfer' ? 'active' : ''}">Переводы</button> -->
       <button data-action="ops-filter" data-val="income" class="${ui.opsFilter === 'income' ? 'active' : ''}">Доходы</button>
     </div>
 
@@ -299,7 +296,6 @@ function renderOps() {
       </div>` : `
       <div class="sums-line">
         <span>Расходы<b>${fmtMoney(expSum, state.settings.baseCurrency)}</b></span>
-        <span>из них переводы<b style="color:var(--accent)">${fmtMoney(trSum, state.settings.baseCurrency)}</b></span>
         <span>Доходы<b style="color:var(--green)">+${fmtMoney(inSum, state.settings.baseCurrency)}</b></span>
       </div>`}
     </div>
@@ -368,6 +364,9 @@ function subRow(s) {
   const credit = isCredit(s);
   const nextNo = Math.min(s.plan ? s.plan.paid + 1 : 0, s.plan ? s.plan.total : 0);
   const pct = credit ? Math.round(s.plan.paid / s.plan.total * 100) : 0;
+  const earlyBtn = credit && s.plan && s.plan.paid < s.plan.total
+    ? `<button type="button" class="btn-xs-early" data-action="pay-sub-early" data-id="${s.id}" title="Внести досрочный платёж (дата следующего списания не изменится)">⚡ Досрочно</button>`
+    : '';
 
   return `
     <div class="row" data-action="edit-sub" data-id="${s.id}">
@@ -382,6 +381,7 @@ function subRow(s) {
           <div class="row-amount">${fmtMoney(s.amount, s.currency)}</div>
           <div class="row-sub">${credit ? 'ост. ' + fmtMoney(creditRemaining(s), s.currency) : (s.period === 'year' ? '/год' : '/мес')}</div>
         </div>
+        ${earlyBtn}
         ${payBtn}
       </div>
     </div>`;
@@ -914,6 +914,20 @@ function captureCurrentTxForm() {
   const original = id ? state.transactions.find((x) => x.id === id) : null;
   const catBtn = document.querySelector('#tx-cats .chip.active');
   const receiptUrlEl = document.getElementById('tx-receipt-url');
+
+  // Сбор позиций товаров из формы
+  const rows = document.querySelectorAll('.tx-item-row');
+  const items = [];
+  rows.forEach((row) => {
+    const nameInput = row.querySelector('.tx-item-name');
+    const priceInput = row.querySelector('.tx-item-price');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const price = priceInput ? parseAmount(priceInput.value) : 0;
+    if (name || price > 0) {
+      items.push({ name: name || 'Товар', price, quantity: 1, total: price });
+    }
+  });
+
   return {
     id,
     type: segValue('#tx-type-seg') || 'expense',
@@ -926,7 +940,7 @@ function captureCurrentTxForm() {
     date: document.getElementById('tx-date') ? document.getElementById('tx-date').value : todayISO(),
     internal: document.getElementById('tx-internal') ? document.getElementById('tx-internal').checked : false,
     receiptUrl: receiptUrlEl ? receiptUrlEl.value : (original ? original.receiptUrl : ''),
-    receiptItems: (ui.tempTxForm && ui.tempTxForm.receiptItems) || (original ? original.receiptItems : null) || [],
+    receiptItems: items.length ? items : ((ui.tempTxForm && ui.tempTxForm.receiptItems) || (original ? original.receiptItems : null) || []),
     source: original ? original.source : 'manual',
     sourceId: original ? original.sourceId : null,
   };
@@ -978,7 +992,7 @@ function openTxForm(tx) {
           <label style="margin-bottom:0">${t.type === 'transfer' ? 'Кому / описание' : 'Описание'}</label>
           <button type="button" class="btn-link-action" data-action="scan-receipt-qr">📷 Чек по QR</button>
         </div>
-        <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: маме на карту' : (t.type === 'income' ? 'например: зарплата' : 'например: кофе с собой')}" value="${esc(t.description)}">
+        <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: перевод' : (t.type === 'income' ? 'например: зарплата' : 'например: покупки')}" value="${esc(t.description)}">
         <input id="tx-receipt-url" type="hidden" value="${esc(t.receiptUrl || '')}">
         <div id="tx-receipt-preview" class="receipt-attached-row" style="${(t.receiptUrl || (t.receiptItems && t.receiptItems.length)) ? '' : 'display:none'}">
           <span>🧾 Чек прикреплён</span>
@@ -991,23 +1005,29 @@ function openTxForm(tx) {
             <button type="button" class="btn-link-action" data-action="reload-tx-receipt-items" style="color:var(--accent);font-size:12px;font-weight:600">🔄 Загрузить товары из ДПС</button>
           </div>
         ` : ''}
-        ${t.receiptItems && t.receiptItems.length ? `
-          <div class="field" id="tx-receipt-items-container" style="margin-top:8px">
-            <label style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);margin-bottom:4px">
-              <span>Позиции из чека (${t.receiptItems.length})</span>
-              <span>${fmtMoney(t.receiptItems.reduce((s, x) => s + (x.total || 0), 0), t.currency || 'UAH')}</span>
-            </label>
-            <div class="receipt-items-list" style="max-height:160px;overflow-y:auto;background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:10px;border:1px solid var(--border)">
-              ${t.receiptItems.map((it) => `
-                <div class="receipt-item-row" style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04)">
-                  <span class="item-name" style="color:var(--text);font-weight:500">${esc(it.name)}</span>
-                  <span class="item-price" style="color:var(--muted);white-space:nowrap;margin-left:8px;font-variant-numeric:tabular-nums">${it.quantity > 1 ? it.quantity + ' × ' : ''}${fmtMoney(it.total, t.currency || 'UAH')}</span>
-                </div>
-              `).join('')}
+      </div>
+
+      <div class="field" id="tx-receipt-items-container" style="margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="margin-bottom:0">Товары и позиции</label>
+          <button type="button" class="btn-link-action" data-action="add-tx-item" style="color:var(--accent);font-size:12px;font-weight:600">+ Добавить товар</button>
+        </div>
+        <div id="tx-items-list" style="display:flex;flex-direction:column;gap:6px">
+          ${(t.receiptItems || []).map((it, i) => `
+            <div class="tx-item-row" data-idx="${i}" style="display:flex;gap:6px;align-items:center">
+              <input type="text" class="tx-item-name" placeholder="Название товара" value="${esc(it.name || '')}" style="flex:2;padding:7px 10px;font-size:13px">
+              <input type="text" inputmode="decimal" class="tx-item-price" placeholder="Цена" value="${it.price || it.total || ''}" style="flex:1;padding:7px 8px;font-size:13px">
+              <button type="button" class="receipt-del-btn" data-action="del-tx-item" data-idx="${i}" title="Удалить" style="color:var(--red);padding:2px 8px">✕</button>
             </div>
-          </div>
+          `).join('')}
+        </div>
+        ${(t.receiptItems && t.receiptItems.length > 0) ? `
+          <button type="button" class="btn-link-action" data-action="calc-tx-items-sum" style="margin-top:6px;font-size:12px;color:var(--accent);font-weight:600">
+            ∑ Подставить сумму товаров (${fmtMoney(t.receiptItems.reduce((s, x) => s + (x.total || x.price || 0), 0), t.currency || 'UAH')}) в поле суммы
+          </button>
         ` : ''}
       </div>
+
       <div class="field" id="tx-internal-field" ${t.type === 'expense' ? 'hidden' : ''}>
         <label style="display:flex;align-items:center;gap:10px;font-size:15px;color:var(--text)">
           <input id="tx-internal" type="checkbox" ${t.internal ? 'checked' : ''}>
@@ -1026,31 +1046,30 @@ function openTxForm(tx) {
 }
 
 function submitTxForm(form) {
-  const amount = parseAmount(document.getElementById('tx-amount').value);
+  const current = captureCurrentTxForm();
+  const amount = parseAmount(current.amount);
   if (!amount) { toast('Введите сумму больше нуля'); return; }
-  const type = segValue('#tx-type-seg') || 'expense';
-  const currency = segValue('#tx-cur-seg') || 'UAH';
-  const catBtn = document.querySelector('#tx-cats .chip.active');
-  const date = document.getElementById('tx-date').value || todayISO();
-  const description = document.getElementById('tx-desc').value.trim();
-  const receiptUrlEl = document.getElementById('tx-receipt-url');
-  const receiptUrl = (receiptUrlEl && receiptUrlEl.value) || null;
-
-  const categoryId = type !== 'transfer' ? (catBtn ? catBtn.dataset.cat : FALLBACK_CATEGORY) : null;
-  const internalEl = document.getElementById('tx-internal');
-  const internal = type !== 'expense' && !!(internalEl && internalEl.checked);
-  const altValue = parseAmount(document.getElementById('tx-alt').value);
+  const type = current.type;
+  const currency = current.currency;
+  const date = current.date;
+  const description = current.description;
+  const categoryId = type !== 'transfer' ? (current.categoryId || FALLBACK_CATEGORY) : null;
+  const internal = type !== 'expense' && current.internal;
+  const altValue = parseAmount(current.altAmount);
   const altAmount = altValue || null;
   const altCurrency = altValue ? otherCurrency(currency) : null;
+  const receiptUrl = current.receiptUrl || null;
+  const receiptItems = current.receiptItems || [];
+
   const id = form.dataset.id;
   if (id) {
     const t = state.transactions.find((x) => x.id === id);
     if (!t) return;
-    Object.assign(t, { type, amount, currency, date, description, categoryId, internal, altAmount, altCurrency, receiptUrl });
+    Object.assign(t, { type, amount, currency, date, description, categoryId, internal, altAmount, altCurrency, receiptUrl, receiptItems });
   } else {
     state.transactions.push({
       id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
-      internal, altAmount, altCurrency, receiptUrl, source: 'manual', sourceId: null,
+      internal, altAmount, altCurrency, receiptUrl, receiptItems, source: 'manual', sourceId: null,
     });
   }
   const [ty, tm] = date.split('-').map(Number);
@@ -1218,7 +1237,11 @@ function openQrScannerModal() {
           📁 Выбрать фото чека из галереи
           <input id="scanner-file" type="file" accept="image/*" style="display:none">
         </label>
-        <button type="button" class="btn secondary" data-action="paste-receipt-data">📋 Вставить XML / текст / ссылку чека</button>
+        <button type="button" class="btn secondary" data-action="paste-receipt-data">📋 Вставить ссылку / текст чека</button>
+        <div id="scanner-manual-paste-box" style="display:none;flex-direction:column;gap:6px;margin-top:4px">
+          <textarea id="scanner-paste-input" rows="3" placeholder="Вставьте ссылку, XML или текст чека сюда…" style="width:100%;border-radius:10px;padding:8px 12px;background:rgba(255,255,255,0.06);border:1px solid var(--border);color:var(--text);font-size:13px;resize:none"></textarea>
+          <button type="button" class="btn" data-action="process-manual-receipt" style="padding:9px;font-size:14px">Распознать чек ✨</button>
+        </div>
       </div>
       <p class="hint" style="text-align:center;margin-top:10px">
         Наведите камеру на QR-код внизу фискального чека (ДПС, Checkbox, Вчасно и др.)
@@ -1333,12 +1356,12 @@ function openReceiptPreviewModal(receipt) {
   openSheet(`
     ${sheetHead('Чек распознан 🎉')}
     <div class="receipt-preview-card">
-      <div class="rate-line" style="margin-bottom:8px">
-        <div>
-          <div style="font-weight:700;font-size:18px;color:var(--text)">${esc(storeName)}</div>
+      <div class="rate-line" style="margin-bottom:8px;align-items:flex-start">
+        <div style="min-width:0;flex:1;margin-right:10px;word-break:break-word">
+          <div style="font-weight:700;font-size:18px;color:var(--text);line-height:1.25">${esc(storeName)}</div>
           <div class="row-sub">${receipt.id ? 'Чек № ' + esc(receipt.id) : ''}${receipt.fn ? ' · ФН ' + esc(receipt.fn) : ''}</div>
         </div>
-        ${receipt.amount ? `<div class="big-amount" style="font-size:22px">${fmtMoney(receipt.amount, 'UAH')}</div>` : ''}
+        ${receipt.amount ? `<div class="big-amount" style="font-size:22px;white-space:nowrap;flex-shrink:0;text-align:right">${fmtMoney(receipt.amount, 'UAH')}</div>` : ''}
       </div>
 
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
@@ -1351,7 +1374,7 @@ function openReceiptPreviewModal(receipt) {
       <div class="field" style="margin-top:12px">
         <label>Описание для операции</label>
         <input id="preview-receipt-desc" type="text" value="${esc(formattedDesc)}">
-        <p class="hint">Можете дополнить покупками (например: ${esc(storeName)} (Салфетки, курица))</p>
+        <p class="hint">Уточните описание при необходимости</p>
       </div>
 
       <button class="btn" data-action="apply-receipt-save">Сохранить операцию с чеком ✨</button>
@@ -1856,6 +1879,29 @@ function paySubscription(id) {
     : 'Записано в расходы, дата сдвинута');
 }
 
+function paySubscriptionEarly(id) {
+  const s = state.subscriptions.find((x) => x.id === id);
+  if (!s || !isCredit(s)) return;
+  state.transactions.push({
+    id: uid(), ts: Date.now(), type: 'expense',
+    amount: s.amount, currency: s.currency,
+    categoryId: 'credit', description: `${s.name} (досрочно)`,
+    date: todayISO(), source: 'manual', sourceId: null,
+  });
+
+  s.plan.paid = Math.min(s.plan.paid + 1, s.plan.total);
+  if (s.plan.paid >= s.plan.total) {
+    s.active = false;
+    save(); render();
+    toast(`«${s.name}» выплачено полностью досрочно 🎉`);
+    return;
+  }
+
+  // Дата следующего регулярного платежа сохраняется без изменений
+  save(); render();
+  toast(`Досрочный платёж ${s.plan.paid} из ${s.plan.total} записан (дата сохранена)`);
+}
+
 async function handleRateRefresh(btn) {
   btn.disabled = true;
   try {
@@ -2199,6 +2245,32 @@ document.addEventListener('click', async (e) => {
       break;
     }
 
+    case 'nav-subs':
+      ui.screen = 'subs';
+      history.replaceState(null, '', '#subs');
+      render();
+      screenEl.scrollTop = 0;
+      break;
+    case 'nav-debts':
+      ui.screen = 'debts';
+      history.replaceState(null, '', '#debts');
+      render();
+      screenEl.scrollTop = 0;
+      break;
+    case 'refresh-rate-home': {
+      const card = document.querySelector('[data-action="refresh-rate-home"]');
+      if (card) card.style.opacity = '0.5';
+      try {
+        await refreshRate(true);
+        render();
+        toast('Курс обновлён: 1 $ = ' + state.rate.usdUah.toFixed(2) + ' ₴');
+      } catch (e) {
+        if (card) card.style.opacity = '1';
+        toast('Не удалось обновить курс: ' + e.message);
+      }
+      break;
+    }
+
     case 'ops-filter':
       ui.opsFilter = val;
       if (val === 'transfer') ui.opsCategory = null;
@@ -2237,16 +2309,58 @@ document.addEventListener('click', async (e) => {
       openQrScannerModal();
       break;
     case 'paste-receipt-data': {
-      stopScannerCamera();
       let text = '';
       if (navigator.clipboard && navigator.clipboard.readText) {
         try { text = await navigator.clipboard.readText(); } catch (e) {}
       }
-      if (!text) {
-        text = prompt('Вставьте ссылку, XML или текст чека:');
-      }
       if (text && text.trim()) {
+        stopScannerCamera();
         handleScannedReceipt(text.trim());
+      } else {
+        const box = document.getElementById('scanner-manual-paste-box');
+        const input = document.getElementById('scanner-paste-input');
+        if (box) {
+          box.style.display = 'flex';
+          if (input) input.focus();
+        }
+      }
+      break;
+    }
+    case 'process-manual-receipt': {
+      const input = document.getElementById('scanner-paste-input');
+      const val = input ? input.value.trim() : '';
+      if (val) {
+        stopScannerCamera();
+        handleScannedReceipt(val);
+      } else {
+        toast('Вставьте текст или ссылку чека');
+      }
+      break;
+    }
+    case 'add-tx-item': {
+      const current = captureCurrentTxForm() || {};
+      current.receiptItems = current.receiptItems || [];
+      current.receiptItems.push({ name: '', price: '', quantity: 1, total: 0 });
+      openTxForm(current);
+      break;
+    }
+    case 'del-tx-item': {
+      const idx = parseInt(el.dataset.idx, 10);
+      const current = captureCurrentTxForm() || {};
+      if (current.receiptItems && current.receiptItems.length > idx) {
+        current.receiptItems.splice(idx, 1);
+      }
+      openTxForm(current);
+      break;
+    }
+    case 'calc-tx-items-sum': {
+      const current = captureCurrentTxForm() || {};
+      const sum = (current.receiptItems || []).reduce((s, x) => s + (x.total || x.price || 0), 0);
+      if (sum > 0) {
+        current.amount = Math.round(sum * 100) / 100;
+        const amountInput = document.getElementById('tx-amount');
+        if (amountInput) amountInput.value = current.amount;
+        toast('Сумма операции обновлена: ' + fmtMoney(current.amount, current.currency));
       }
       break;
     }
@@ -2408,6 +2522,7 @@ document.addEventListener('click', async (e) => {
     case 'add-category': openCategoryForm(null); break;
 
     case 'pay-sub': paySubscription(id); break;
+    case 'pay-sub-early': paySubscriptionEarly(id); break;
     case 'settle-debt': {
       const d = state.debts.find((x) => x.id === id);
       if (d) {
