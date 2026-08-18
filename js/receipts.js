@@ -536,34 +536,20 @@ function detectMerchantInfo(hint = '', fn = '', items = []) {
 }
 
 /**
- * Формирует читаемый текст описания для операции из данных чека.
+ * Формирует чистое лаконичное описание для операции из данных чека (например: «АТБ» или «VARUS»).
+ * Построчный список товаров хранится в receiptItems, поэтому не загромождаем заголовок скобками.
  */
 function formatReceiptDescription(receipt, storeHint = '') {
-  if (!receipt) return storeHint || '';
+  if (!receipt) return storeHint ? normalizeBrandName(storeHint) : '';
 
   const rawStore = receipt.storeName || storeHint || '';
   const store = normalizeBrandName(rawStore);
-
-  // Если есть список распознанных товаров
-  if (receipt.items && receipt.items.length > 0) {
-    const itemNames = receipt.items.map((it) => it.name.trim()).filter(Boolean);
-    const maxItems = 6;
-    const shown = itemNames.slice(0, maxItems).join(', ');
-    const more = itemNames.length > maxItems ? ` (ще ${itemNames.length - maxItems})` : '';
-    return store ? `${store} (${shown}${more})` : `${shown}${more}`;
-  }
-
-  // Если товаров в чеке нет, но в storeHint уже было подробное описание со скобками — сохраняем его
-  if (storeHint && storeHint.includes('(')) {
-    return storeHint;
-  }
-
-  // Если товаров нет — красивое чистое название магазина (или номер если вообще нет названия)
   if (store) return store;
+
   if (receipt.id) {
     const checkNum = String(receipt.id).replace(/^0+/, '') || receipt.id;
     return `Чек № ${checkNum}`;
   }
 
-  return storeHint || 'Чек по QR';
+  return 'Чек по QR';
 }

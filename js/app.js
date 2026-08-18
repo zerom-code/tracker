@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '59';
+const APP_VERSION = '60';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -913,6 +913,26 @@ function altFieldPlaceholder(t) {
   return 'примерно ' + est.toFixed(2);
 }
 
+function updateTxItemsSumButton() {
+  const container = document.getElementById('tx-items-list');
+  const calcBtn = document.getElementById('tx-calc-sum-btn');
+  if (!container || !calcBtn) return;
+  const rows = container.querySelectorAll('.tx-item-row');
+  let sum = 0;
+  rows.forEach((row) => {
+    const priceInput = row.querySelector('.tx-item-price');
+    const price = priceInput ? parseAmount(priceInput.value) : 0;
+    if (price) sum += price;
+  });
+  const cur = segValue('#tx-cur-seg') || 'UAH';
+  if (rows.length > 0) {
+    calcBtn.style.display = 'block';
+    calcBtn.textContent = `∑ Подставить сумму товаров (${fmtMoney(sum, cur)}) в поле суммы`;
+  } else {
+    calcBtn.style.display = 'none';
+  }
+}
+
 function captureCurrentTxForm() {
   const form = document.getElementById('sheet-form');
   if (!form || form.dataset.form !== 'tx') return null;
@@ -946,7 +966,7 @@ function captureCurrentTxForm() {
     date: document.getElementById('tx-date') ? document.getElementById('tx-date').value : todayISO(),
     internal: document.getElementById('tx-internal') ? document.getElementById('tx-internal').checked : false,
     receiptUrl: receiptUrlEl ? receiptUrlEl.value : (original ? original.receiptUrl : ''),
-    receiptItems: items.length ? items : ((ui.tempTxForm && ui.tempTxForm.receiptItems) || (original ? original.receiptItems : null) || []),
+    receiptItems: rows.length > 0 ? items : ((ui.tempTxForm && ui.tempTxForm.receiptItems) || (original ? original.receiptItems : null) || []),
     source: original ? original.source : 'manual',
     sourceId: original ? original.sourceId : null,
   };
@@ -1016,22 +1036,20 @@ function openTxForm(tx) {
       <div class="field" id="tx-receipt-items-container" style="margin-top:8px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
           <label style="margin-bottom:0">Товары и позиции</label>
-          <button type="button" class="btn-link-action" data-action="add-tx-item" style="color:var(--accent);font-size:12px;font-weight:600">+ Добавить товар</button>
+          <button type="button" class="btn-link-action" data-action="add-tx-item" style="color:var(--accent);font-size:12.5px;font-weight:600">+ Добавить товар</button>
         </div>
         <div id="tx-items-list" style="display:flex;flex-direction:column;gap:6px">
-          ${(t.receiptItems || []).map((it, i) => `
-            <div class="tx-item-row" data-idx="${i}" style="display:flex;gap:6px;align-items:center">
+          ${(t.receiptItems || []).map((it) => `
+            <div class="tx-item-row" style="display:flex;gap:6px;align-items:center">
               <input type="text" class="tx-item-name" placeholder="Название товара" value="${esc(it.name || '')}" style="flex:2;padding:7px 10px;font-size:13px">
               <input type="text" inputmode="decimal" class="tx-item-price" placeholder="Цена" value="${it.price || it.total || ''}" style="flex:1;padding:7px 8px;font-size:13px">
-              <button type="button" class="receipt-del-btn" data-action="del-tx-item" data-idx="${i}" title="Удалить" style="color:var(--red);padding:2px 8px">✕</button>
+              <button type="button" class="receipt-del-btn" data-action="del-tx-item" title="Удалить" style="color:var(--red);padding:4px 8px">✕</button>
             </div>
           `).join('')}
         </div>
-        ${(t.receiptItems && t.receiptItems.length > 0) ? `
-          <button type="button" class="btn-link-action" data-action="calc-tx-items-sum" style="margin-top:6px;font-size:12px;color:var(--accent);font-weight:600">
-            ∑ Подставить сумму товаров (${fmtMoney(t.receiptItems.reduce((s, x) => s + (x.total || x.price || 0), 0), t.currency || 'UAH')}) в поле суммы
-          </button>
-        ` : ''}
+        <button type="button" id="tx-calc-sum-btn" class="btn-link-action" data-action="calc-tx-items-sum" style="margin-top:6px;font-size:12px;color:var(--accent);font-weight:600;display:${(t.receiptItems && t.receiptItems.length > 0) ? 'block' : 'none'}">
+          ∑ Подставить сумму товаров (${fmtMoney((t.receiptItems || []).reduce((s, x) => s + (x.total || x.price || 0), 0), t.currency || 'UAH')}) в поле суммы
+        </button>
       </div>
 
       <div class="field" id="tx-internal-field" ${t.type === 'expense' ? 'hidden' : ''}>
@@ -2185,20 +2203,7 @@ document.addEventListener('click', async (e) => {
         });
         input.value = ''; // прежний эквивалент относился к другой валюте
       }
-      const totalLabel = document.querySelector('#tx-receipt-items-container label span:last-child');
-      const form = document.getElementById('sheet-form');
-      const txId = form ? form.dataset.id : null;
-      const currentTx = txId ? state.transactions.find((x) => x.id === txId) : ui.tempTxForm;
-      if (currentTx && currentTx.receiptItems && currentTx.receiptItems.length) {
-        if (totalLabel) totalLabel.textContent = fmtMoney(currentTx.receiptItems.reduce((s, x) => s + (x.total || 0), 0), cur);
-        const rows = document.querySelectorAll('#tx-receipt-items-container .receipt-item-row');
-        currentTx.receiptItems.forEach((it, idx) => {
-          if (rows[idx]) {
-            const priceEl = rows[idx].querySelector('.item-price');
-            if (priceEl) priceEl.textContent = (it.quantity > 1 ? it.quantity + ' × ' : '') + fmtMoney(it.total, cur);
-          }
-        });
-      }
+      updateTxItemsSumButton();
     }
     return;
   }
@@ -2354,29 +2359,47 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'add-tx-item': {
-      const current = captureCurrentTxForm() || {};
-      current.receiptItems = current.receiptItems || [];
-      current.receiptItems.push({ name: '', price: '', quantity: 1, total: 0 });
-      openTxForm(current);
+      const container = document.getElementById('tx-items-list');
+      if (container) {
+        const row = document.createElement('div');
+        row.className = 'tx-item-row';
+        row.style.cssText = 'display:flex;gap:6px;align-items:center';
+        row.innerHTML = `
+          <input type="text" class="tx-item-name" placeholder="Название товара" value="" style="flex:2;padding:7px 10px;font-size:13px">
+          <input type="text" inputmode="decimal" class="tx-item-price" placeholder="Цена" value="" style="flex:1;padding:7px 8px;font-size:13px">
+          <button type="button" class="receipt-del-btn" data-action="del-tx-item" title="Удалить" style="color:var(--red);padding:4px 8px">✕</button>
+        `;
+        container.appendChild(row);
+        updateTxItemsSumButton();
+        const nameInput = row.querySelector('.tx-item-name');
+        if (nameInput) nameInput.focus();
+      }
       break;
     }
     case 'del-tx-item': {
-      const idx = parseInt(el.dataset.idx, 10);
-      const current = captureCurrentTxForm() || {};
-      if (current.receiptItems && current.receiptItems.length > idx) {
-        current.receiptItems.splice(idx, 1);
+      const row = el.closest('.tx-item-row');
+      if (row) {
+        row.remove();
+        updateTxItemsSumButton();
       }
-      openTxForm(current);
       break;
     }
     case 'calc-tx-items-sum': {
-      const current = captureCurrentTxForm() || {};
-      const sum = (current.receiptItems || []).reduce((s, x) => s + (x.total || x.price || 0), 0);
+      const container = document.getElementById('tx-items-list');
+      if (!container) break;
+      const rows = container.querySelectorAll('.tx-item-row');
+      let sum = 0;
+      rows.forEach((row) => {
+        const priceInput = row.querySelector('.tx-item-price');
+        const price = priceInput ? parseAmount(priceInput.value) : 0;
+        if (price) sum += price;
+      });
       if (sum > 0) {
-        current.amount = Math.round(sum * 100) / 100;
+        const rounded = Math.round(sum * 100) / 100;
         const amountInput = document.getElementById('tx-amount');
-        if (amountInput) amountInput.value = current.amount;
-        toast('Сумма операции обновлена: ' + fmtMoney(current.amount, current.currency));
+        if (amountInput) amountInput.value = rounded;
+        const cur = segValue('#tx-cur-seg') || 'UAH';
+        toast('Сумма операции обновлена: ' + fmtMoney(rounded, cur));
       }
       break;
     }
@@ -2792,6 +2815,12 @@ document.addEventListener('change', (e) => {
   if (notifyToggle) {
     saveNotifySettings({ [notifyToggle.dataset.key]: notifyToggle.checked })
       .catch((err) => { toast(err.message); render(); });
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target && (e.target.closest('#tx-items-list') || e.target.id === 'tx-amount')) {
+    updateTxItemsSumButton();
   }
 });
 
