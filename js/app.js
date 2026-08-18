@@ -1,5 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
+const APP_VERSION = '53';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -671,7 +672,7 @@ function renderSettings() {
     </div>
 
     <p class="hint" style="text-align:center">
-      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия 52</span> ·
+      <span data-action="diag-toggle" style="cursor:pointer">Трекер трат · версия ${APP_VERSION}</span> ·
       <span data-action="force-sw-update" style="cursor:pointer;color:var(--accent);font-weight:600">🔄 Обновить</span>
     </p>
     ${ui.showDiag ? `
@@ -2225,23 +2226,24 @@ document.addEventListener('click', async (e) => {
       break;
 
     case 'force-sw-update': {
-      toast('Проверяем обновления…');
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistration().then((reg) => {
-          if (reg) {
-            reg.update().then(() => {
-              if (reg.waiting) {
-                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-              }
-              setTimeout(() => { window.location.reload(); }, 400);
-            }).catch(() => { window.location.reload(); });
-          } else {
-            window.location.reload();
+      toast('Обновляем приложение…');
+      try {
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            await r.unregister();
           }
-        }).catch(() => { window.location.reload(); });
-      } else {
-        window.location.reload();
+        }
+      } catch (e) {
+        console.warn('Update error:', e);
       }
+      setTimeout(() => {
+        window.location.reload(true);
+      }, 300);
       break;
     }
 
