@@ -539,7 +539,7 @@ function detectMerchantInfo(hint = '', fn = '', items = []) {
  * Формирует читаемый текст описания для операции из данных чека.
  */
 function formatReceiptDescription(receipt, storeHint = '') {
-  if (!receipt) return '';
+  if (!receipt) return storeHint || '';
 
   const rawStore = receipt.storeName || storeHint || '';
   const store = normalizeBrandName(rawStore);
@@ -553,6 +553,11 @@ function formatReceiptDescription(receipt, storeHint = '') {
     return store ? `${store} (${shown}${more})` : `${shown}${more}`;
   }
 
+  // Если товаров в чеке нет, но в storeHint уже было подробное описание со скобками — сохраняем его
+  if (storeHint && storeHint.includes('(')) {
+    return storeHint;
+  }
+
   // Если товаров нет — красивое чистое название магазина (или номер если вообще нет названия)
   if (store) return store;
   if (receipt.id) {
@@ -560,5 +565,5 @@ function formatReceiptDescription(receipt, storeHint = '') {
     return `Чек № ${checkNum}`;
   }
 
-  return 'Чек по QR';
+  return storeHint || 'Чек по QR';
 }

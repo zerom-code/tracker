@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '58';
+const APP_VERSION = '59';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -1343,7 +1343,8 @@ async function handleScannedReceipt(rawText) {
 function openReceiptPreviewModal(receipt) {
   ui.pendingReceipt = receipt;
   const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
-  const storeName = receipt.storeName || storeHint || receipt.typeName || 'Фіскальний чек';
+  const brandName = normalizeBrandName(storeHint);
+  const storeName = receipt.storeName || brandName || receipt.typeName || 'Фіскальний чек';
   const categoryId = detectCategoryFromItems(receipt.items || [], storeName);
   const matchedCat = categoryId ? categoryById(categoryId) : null;
   const formattedDesc = formatReceiptDescription(receipt, storeHint);
@@ -1357,7 +1358,11 @@ function openReceiptPreviewModal(receipt) {
         </div>
       `).join('')}
     </div>
-  ` : '';
+  ` : `
+    <div style="margin-top:6px;padding:8px 12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px dashed var(--border);color:var(--muted);font-size:12.5px;line-height:1.4">
+      ℹ️ В бумажном чеке РРО с сайта ДПС нет построчного списка товаров (только сумма и реквизиты). Описание сохранено.
+    </div>
+  `;
 
   openSheet(`
     ${sheetHead('Чек распознан 🎉')}
@@ -2419,13 +2424,13 @@ document.addEventListener('click', async (e) => {
       if (r) {
         const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
         const descInput = document.getElementById('preview-receipt-desc');
-        const description = descInput ? descInput.value.trim() : formatReceiptDescription(r, storeHint);
+        const description = descInput ? descInput.value.trim() : (storeHint || formatReceiptDescription(r, storeHint));
         const amount = r.amount || (ui.tempTxForm && ui.tempTxForm.amount) || 0;
         const date = r.date || (ui.tempTxForm && ui.tempTxForm.date) || todayISO();
         const store = r.storeName || storeHint || '';
         const categoryId = detectCategoryFromItems(r.items || [], store);
         const receiptUrl = r.rawUrl || (ui.tempTxForm && ui.tempTxForm.receiptUrl) || '';
-        const receiptItems = (r.items && r.items.length) ? r.items : [];
+        const receiptItems = (r.items && r.items.length) ? r.items : ((ui.tempTxForm && ui.tempTxForm.receiptItems) || []);
         const type = (ui.tempTxForm && ui.tempTxForm.type) || 'expense';
         const currency = (ui.tempTxForm && ui.tempTxForm.currency) || 'UAH';
 
@@ -2455,14 +2460,14 @@ document.addEventListener('click', async (e) => {
       if (r && ui.tempTxForm) {
         const storeHint = ui.tempTxForm.description || '';
         const descInput = document.getElementById('preview-receipt-desc');
-        ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r, storeHint);
+        ui.tempTxForm.description = descInput ? descInput.value.trim() : (storeHint || formatReceiptDescription(r, storeHint));
         if (r.amount) ui.tempTxForm.amount = r.amount;
         if (r.date) ui.tempTxForm.date = r.date;
         ui.tempTxForm.currency = 'UAH';
         const store = r.storeName || storeHint || '';
         ui.tempTxForm.categoryId = detectCategoryFromItems(r.items || [], store);
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
-        ui.tempTxForm.receiptItems = (r.items && r.items.length) ? r.items : [];
+        ui.tempTxForm.receiptItems = (r.items && r.items.length) ? r.items : (ui.tempTxForm.receiptItems || []);
         closeSheet();
         openTxForm(ui.tempTxForm);
         toast('Данные чека применены ✨');
@@ -2472,8 +2477,9 @@ document.addEventListener('click', async (e) => {
     case 'apply-receipt-desc-only': {
       const r = ui.pendingReceipt;
       if (r && ui.tempTxForm) {
+        const storeHint = ui.tempTxForm.description || '';
         const descInput = document.getElementById('preview-receipt-desc');
-        ui.tempTxForm.description = descInput ? descInput.value.trim() : formatReceiptDescription(r);
+        ui.tempTxForm.description = descInput ? descInput.value.trim() : (storeHint || formatReceiptDescription(r, storeHint));
         ui.tempTxForm.currency = 'UAH';
         ui.tempTxForm.receiptUrl = r.rawUrl || '';
         closeSheet();
