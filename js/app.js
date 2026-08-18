@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '56';
+const APP_VERSION = '57';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -132,11 +132,11 @@ function renderHome() {
         <div class="stat-value">${effectiveRate() ? effectiveRate().toFixed(2) + ' ₴' : '—'}</div>
         <div class="row-sub">${state.settings.manualRate ? 'ручной курс' : esc(state.rate.source)}</div>
       </div>
-      <div class="card stat-card-interactive" data-action="nav-debts" role="button" tabindex="0" title="Перейти к долгам">
+      <div class="card stat-card-interactive" data-action="nav-debts" data-dir="owe-me" role="button" tabindex="0" title="Перейти к разделу «Мне должны»">
         <div class="stat-label">Мне должны ›</div>
         <div class="stat-value green">${oweMe.main}</div>
       </div>
-      <div class="card stat-card-interactive" data-action="nav-debts" role="button" tabindex="0" title="Перейти к долгам">
+      <div class="card stat-card-interactive" data-action="nav-debts" data-dir="i-owe" role="button" tabindex="0" title="Перейти к разделу «Я должен»">
         <div class="stat-label">Я должен ›</div>
         <div class="stat-value red">${iOwe.main}</div>
       </div>
@@ -2212,7 +2212,7 @@ document.addEventListener('click', async (e) => {
 
   const el = e.target.closest('[data-action]');
   if (!el) return;
-  const { action, id, val, debt, cat } = el.dataset;
+  const { action, id, val, debt, cat, dir } = el.dataset;
 
   switch (action) {
     case 'modal-close':
@@ -2248,6 +2248,9 @@ document.addEventListener('click', async (e) => {
       screenEl.scrollTop = 0;
       break;
     case 'nav-debts':
+      if (dir === 'i-owe' || dir === 'owe-me') {
+        ui.debtsTab = dir;
+      }
       ui.screen = 'debts';
       history.replaceState(null, '', '#debts');
       render();
