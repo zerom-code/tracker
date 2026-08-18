@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '55';
+const APP_VERSION = '56';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -359,7 +359,7 @@ function subRow(s) {
   const nextNo = Math.min(s.plan ? s.plan.paid + 1 : 0, s.plan ? s.plan.total : 0);
   const pct = credit ? Math.round(s.plan.paid / s.plan.total * 100) : 0;
   const earlyBtn = credit && s.plan && s.plan.paid < s.plan.total
-    ? `<button type="button" class="btn-xs-early" data-action="pay-sub-early" data-id="${s.id}" title="Внести досрочный платёж (дата следующего списания не изменится)">⚡ Досрочно</button>`
+    ? `<button type="button" class="btn-xs-early" data-action="pay-sub-early" data-id="${s.id}" title="Внести платёж досрочно (дата сдвинется на следующий месяц)">⚡ Досрочно</button>`
     : '';
 
   return `
@@ -1891,9 +1891,10 @@ function paySubscriptionEarly(id) {
     return;
   }
 
-  // Дата следующего регулярного платежа сохраняется без изменений
+  // Сдвигаем дату следующего платежа на следующий месяц
+  s.nextDate = addPeriod(s.nextDate, s.period);
   save(); render();
-  toast(`Досрочный платёж ${s.plan.paid} из ${s.plan.total} записан (дата сохранена)`);
+  toast(`Досрочный платёж ${s.plan.paid} из ${s.plan.total} записан, следующий: ${fmtDay(s.nextDate)}`);
 }
 
 async function handleRateRefresh(btn) {
