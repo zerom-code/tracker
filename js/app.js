@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '57';
+const APP_VERSION = '58';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -346,6 +346,7 @@ function subRow(s) {
   let badge = '';
   if (days < 0) badge = `<span class="badge danger">просрочено ${-days} дн.</span>`;
   else if (days === 0) badge = '<span class="badge warn">сегодня</span>';
+  else if (days === 1) badge = '<span class="badge warn">завтра</span>';
   else if (days <= 5) badge = `<span class="badge warn">через ${days} дн.</span>`;
   else badge = `<span class="badge">через ${days} дн.</span>`;
 
@@ -363,21 +364,32 @@ function subRow(s) {
     : '';
 
   return `
-    <div class="row" data-action="edit-sub" data-id="${s.id}">
-      <div class="row-emoji">${credit ? '💳' : '🔁'}</div>
-      <div class="row-main">
-        <div class="row-title">${esc(s.name)}</div>
-        <div class="row-sub${credit ? ' wrap' : ''}">${badge} ${dateStr}${credit ? ` · платёж ${nextNo} из ${s.plan.total}` : ` · ${s.period === 'year' ? 'ежегодно' : 'ежемесячно'}`}</div>
-        ${credit ? `<div class="cat-bar-track" style="margin-top:6px"><div class="cat-bar-fill" style="width:${Math.max(2, pct)}%"></div></div>` : ''}
-      </div>
-      <div class="inline-actions">
-        <div class="row-right">
+    <div class="sub-card-row" data-action="edit-sub" data-id="${s.id}">
+      <div class="sub-card-top">
+        <div class="row-emoji">${credit ? '💳' : '🔁'}</div>
+        <div class="sub-card-title-col">
+          <div class="row-title">${esc(s.name)}</div>
+          <div class="sub-card-dates">
+            ${badge}
+            <span class="sub-date-text">${dateStr}</span>
+            <span class="sub-step-text">${credit ? `· платёж ${nextNo} из ${s.plan.total}` : `· ${s.period === 'year' ? 'ежегодно' : 'ежемесячно'}`}</span>
+          </div>
+        </div>
+        <div class="sub-card-amount-col">
           <div class="row-amount">${fmtMoney(s.amount, s.currency)}</div>
           <div class="row-sub">${credit ? 'ост. ' + fmtMoney(creditRemaining(s), s.currency) : (s.period === 'year' ? '/год' : '/мес')}</div>
         </div>
-        ${earlyBtn}
-        ${payBtn}
+        ${!credit && payBtn ? `<div class="sub-card-actions">${payBtn}</div>` : ''}
       </div>
+      ${credit ? `
+      <div class="sub-card-bottom">
+        <div class="sub-progress-wrap">
+          <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${Math.max(3, pct)}%"></div></div>
+          <div class="sub-progress-label">${pct}% выплачено (${s.plan.paid} из ${s.plan.total})</div>
+        </div>
+        ${earlyBtn || payBtn ? `<div class="sub-card-actions">${earlyBtn} ${payBtn}</div>` : ''}
+      </div>
+      ` : ''}
     </div>`;
 }
 

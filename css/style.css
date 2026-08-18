@@ -256,13 +256,16 @@ input[type="checkbox"]:checked::after {
 }
 
 .badge {
-  display: inline-block;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
   font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 20px;
+  padding: 2px 7px;
+  border-radius: 6px;
   background: var(--card-2);
   color: var(--muted);
+  white-space: nowrap;
+  line-height: 1.2;
 }
 .badge.warn { background: rgba(255, 194, 75, 0.15); color: var(--yellow); }
 .badge.danger { background: rgba(255, 107, 107, 0.15); color: var(--red); }
@@ -1033,14 +1036,102 @@ input[type="checkbox"]:checked::after {
   border-color: var(--accent);
 }
 
+/* ---------- карточки подписок и рассрочек ---------- */
+
+.sub-card-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  width: 100%;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.sub-card-row:last-child { border-bottom: none; }
+
+.sub-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+}
+
+.sub-card-title-col {
+  flex: 1;
+  min-width: 0;
+}
+.sub-card-title-col .row-title {
+  font-size: 15.5px;
+  font-weight: 600;
+  white-space: normal;
+  line-height: 1.3;
+}
+
+.sub-card-dates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.sub-date-text {
+  font-weight: 500;
+  color: var(--text);
+}
+.sub-step-text {
+  color: var(--muted);
+}
+
+.sub-card-amount-col {
+  text-align: right;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+.sub-card-amount-col .row-amount {
+  font-size: 15.5px;
+}
+.sub-card-amount-col .row-sub {
+  font-size: 12px;
+  margin-top: 1px;
+}
+
+.sub-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding-left: 52px; /* отступ под иконкой (40px + 12px gap) */
+}
+
+.sub-progress-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sub-progress-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sub-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .btn-xs-early {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--accent);
   background: var(--accent-dim);
-  border: 1px solid rgba(91, 140, 255, 0.3);
-  border-radius: 12px;
-  padding: 4px 8px;
+  border: 1px solid rgba(91, 140, 255, 0.35);
+  border-radius: 10px;
+  padding: 5px 10px;
   cursor: pointer;
   white-space: nowrap;
   transition: opacity 0.15s ease, transform 0.12s ease;
