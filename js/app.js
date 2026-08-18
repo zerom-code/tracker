@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '53';
+const APP_VERSION = '54';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -84,8 +84,7 @@ function render() {
 
 function renderHome() {
   const y = now.getFullYear(), m = now.getMonth();
-  const spentBase = sumBase(outflowOfMonth(y, m)); // траты вместе с переводами
-  const transfersBase = sumBase(txOfMonth(y, m, 'transfer'));
+  const spentBase = sumBase(outflowOfMonth(y, m)); // только расходы (без переводов)
   const incomeBase = sumBase(txOfMonth(y, m, 'income'));
   const spent = moneyBoth(spentBase);
 
@@ -102,8 +101,6 @@ function renderHome() {
     const id = t.categoryId || FALLBACK_CATEGORY;
     byCat[id] = (byCat[id] || 0) + txBase(t);
   }
-  // Категория «Переводы» отключена
-  // if (transfersBase > 0) byCat[TRANSFERS_ROW] = transfersBase;
   const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 7);
   const maxCat = cats.length ? cats[0][1] : 1;
 
@@ -121,10 +118,6 @@ function renderHome() {
       <div class="rate-line">
         <span style="color:var(--muted);font-size:14px">Доходы за месяц</span>
         <span style="font-weight:700;color:var(--green)">+${fmtMoney(incomeBase, state.settings.baseCurrency)}</span>
-      </div>
-      <div class="rate-line" style="margin-top:6px">
-        <span style="color:var(--muted);font-size:14px">Из них переводы</span>
-        <span style="font-weight:700;color:var(--accent)">${fmtMoney(transfersBase, state.settings.baseCurrency)}</span>
       </div>
     </div>
 

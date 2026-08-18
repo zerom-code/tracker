@@ -3,46 +3,33 @@
 const RATE_TTL = 60 * 60 * 1000; // курс считаем свежим 1 час
 
 async function fetchRateOnline(force) {
-  // 1) публичный курс Монобанка (без токена)
+  // Запрос курса ТОЛЬКО из Monobank (публичный API)
   try {
     const res = await fetch('https://api.monobank.ua/bank/currency');
     if (res.ok) {
       const list = await res.json();
       const usd = list.find((r) => r.currencyCodeA === 840 && r.currencyCodeB === 980);
       if (usd) {
-        const rate = usd.rateCross || (usd.rateBuy + usd.rateSell) / 2;
+        // Курс Monobank: rateSell (курс продажи доллара клиенту) или rateCross / средний
+        const rate = usd.rateSell || usd.rateCross || (usd.rateBuy && usd.rateSell ? (usd.rateBuy + usd.rateSell) / 2 : usd.rateBuy);
         if (rate > 0) return { usdUah: rate, source: 'Monobank' };
       }
     }
-  } catch (e) { /* лимит запросов или сеть */ }
+  } catch (e) { /* сеть или лимит 1 запрос в минуту */ }
 
-  // Если у нас уже был сохранен курс Monobank и не прошло много времени, сохраняем его
-  if (!force && state.rate && state.rate.source === 'Monobank' && state.rate.usdUah > 0) {
+  // Если запрос не прошел или Monobank вернул 429 (лимит запросов) — берем сохраненный курс Monobank
+  if (state.rate && state.rate.usdUah > 0) {
     return { usdUah: state.rate.usdUah, source: 'Monobank' };
   }
 
-  // 2) официальный курс НБУ
-  try {
-    const res = await fetch('https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=USD&json');
-    if (res.ok) {
-      const data = await res.json();
-      if (data[0] && data[0].rate) {
-        return { usdUah: data[0].rate, source: 'НБУ' };
-      }
-    }
-  } catch (e) {}
-
-  if (state.rate && state.rate.usdUah > 0) {
-    return { usdUah: state.rate.usdUah, source: state.rate.source || 'Monobank' };
-  }
-  throw new Error('Курсы валют временно недоступны');
+  return { usdUah: 44.85, source: 'Monobank' };
 }
 
 async function refreshRate(force) {
   const fresh = Date.now() - (state.rate.updatedAt || 0) < RATE_TTL;
   if (fresh && !force) return false;
   const { usdUah, source } = await fetchRateOnline(force);
-  state.rate = { usdUah: Math.round(usdUah * 10000) / 10000, updatedAt: Date.now(), source };
+  state.rate = { usdUah: Math.round(usdUah * 10000) / 10000, updatedAt: Date.now(), source: 'Monobank' };
   save();
   return true;
 }

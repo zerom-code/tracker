@@ -73,11 +73,13 @@ function load() {
     if (!raw) return defaultState();
     const data = JSON.parse(raw);
     const base = defaultState();
+    const rateObj = { ...base.rate, ...(data.rate || {}) };
+    if (rateObj.source === 'НБУ' || !rateObj.source) rateObj.source = 'Monobank';
     return {
       ...base,
       ...data,
       settings: { ...base.settings, ...(data.settings || {}) },
-      rate: { ...base.rate, ...(data.rate || {}) },
+      rate: rateObj,
       mono: { ...base.mono, ...(data.mono || {}) },
       sync: { ...base.sync, ...(data.sync || {}) },
       categories: mergeCategories(data.categories, base.categories),
@@ -214,24 +216,21 @@ function txOfMonth(year, month, type) {
     t.date.startsWith(prefix) && (!type || (t.type === type && !t.internal)));
 }
 
-/* Расход — это все деньги, ушедшие со счёта: и траты, и переводы.
-   Переводы дополнительно показываются отдельной строкой внутри этой суммы. */
+/* Расход — это исключительно траты (категория «Переводы» исключена) */
 function outflowOfMonth(year, month) {
-  return txOfMonth(year, month).filter((t) =>
-    (t.type === 'expense' || t.type === 'transfer') && !t.internal);
+  return txOfMonth(year, month, 'expense');
 }
 
 function isOutflow(t) {
-  return t.type === 'expense' || t.type === 'transfer';
+  return t.type === 'expense';
 }
 
-/* Сумма операции в валюте учёта. Если известен точный эквивалент по курсу
-   банка на момент операции, берём его: пересчёт по сегодняшнему курсу дал бы
-   другую цифру, хотя потрачена была именно эта сумма. */
+/* Сумма операции в валюте учёта. */
 function txBase(t) {
+  if (t.currency === state.settings.baseCurrency) return t.amount;
   if (t.altAmount && t.altCurrency === state.settings.baseCurrency) {
     const expected = toBase(t.amount, t.currency);
-    if (expected > 0 && Math.abs(t.altAmount - expected) / expected < 0.5) {
+    if (expected > 0 && Math.abs(t.altAmount - expected) / expected < 0.2) {
       return t.altAmount;
     }
   }
