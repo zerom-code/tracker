@@ -134,8 +134,15 @@ function mapMonoItem(item, currency, accountId) {
   const isCredit = !isIncome && isCreditPayment(desc);
   const isTransfer = !isIncome && !isCredit && TRANSFER_MCC.includes(item.mcc);
   const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
-  const when = new Date((item.time || Math.floor(Date.now() / 1000)) * 1000);
-  const alt = monoAltOf(item, currency);
+  let txCurrency = currency || 'UAH';
+  let txAmount = Math.abs(item.amount) / 100;
+  let alt = monoAltOf(item, txCurrency);
+
+  // Если операция совершена в гривнах (currencyCode 980), но валюта карты ошибочно передана как USD
+  if (item.currencyCode === 980 && txCurrency === 'USD' && item.operationAmount && Math.abs(item.operationAmount) === Math.abs(item.amount)) {
+    txCurrency = 'UAH';
+    alt = null;
+  }
 
   return {
     altAmount: alt ? alt.amount : null,
@@ -143,8 +150,8 @@ function mapMonoItem(item, currency, accountId) {
     id: uid(),
     ts: when.getTime(),
     type,
-    amount: Math.abs(item.amount) / 100,
-    currency,
+    amount: txAmount,
+    currency: txCurrency,
     categoryId: isCredit ? 'credit' : (type === 'transfer' ? null : (isIncome ? FALLBACK_CATEGORY : categoryForMcc(item.mcc))),
     description: desc,
     date: toISO(when),

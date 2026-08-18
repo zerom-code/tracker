@@ -60,10 +60,39 @@ function defaultState() {
 function migrateTransactions(txs) {
   if (!Array.isArray(txs)) return [];
   return txs.map((t) => {
-    if (t.type === 'transfer' && !t.internal && /погашен|розстрочк|рассрочк|частинами|кредит/i.test(t.description || '')) {
-      return { ...t, type: 'expense', categoryId: 'credit' };
+    let updated = { ...t };
+
+    // 1. Исправление типа рассрочек/кредитов
+    if (updated.type === 'transfer' && !updated.internal && /погашен|розстрочк|рассрочк|частинами|кредит/i.test(updated.description || '')) {
+      updated.type = 'expense';
+      updated.categoryId = 'credit';
     }
-    return t;
+
+    // 2. Исправление операций, где валюта ошибочно стала USD вместо UAH
+    if (updated.currency === 'USD') {
+      const isUahMerchant = /varus|варус|атб|atb|сільпо|сильпо|нова\s*пошта|novapay|новапей|розетка|rozetka|фора|fora|аптека|єва|eva|prostor|окко|okko|wog|вог|комфі|comfy|алло|allo|foxtrot|фокстрот|епіцентр|эпицентр|epicentr|metro|метро|ашан|auchan|велика|кишеня/i.test(updated.description || '');
+      const hasReceipt = Boolean(updated.receiptUrl || (updated.receiptItems && updated.receiptItems.length));
+      const sameAlt = updated.altCurrency === 'UAH' && updated.altAmount && Math.abs(updated.amount - updated.altAmount) < 0.05;
+
+      // Если сумма в долларах совпадает с гривневой (например 258.01 $ и 258.01 ₴), или это чек, или украинский магазин
+      if (sameAlt || hasReceipt || (isUahMerchant && updated.amount > 30)) {
+        updated.currency = 'UAH';
+        if (updated.altCurrency === 'UAH') {
+          updated.altAmount = null;
+          updated.altCurrency = null;
+        }
+      } else if (isUahMerchant && updated.altCurrency === 'UAH' && updated.altAmount && updated.altAmount > updated.amount) {
+        // Случай с конвертацией (например 16.42 USD и 730.14 UAH): восстанавливаем 730.14 как основную сумму в UAH
+        const uahAmount = updated.altAmount;
+        const usdAmount = updated.amount;
+        updated.currency = 'UAH';
+        updated.amount = uahAmount;
+        updated.altAmount = usdAmount;
+        updated.altCurrency = 'USD';
+      }
+    }
+
+    return updated;
   });
 }
 
@@ -105,6 +134,7 @@ function mergeCategories(saved, base) {
 }
 
 let state = load();
+save();
 
 function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
