@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '60';
+const APP_VERSION = '61';
 const now = new Date();
 const ui = {
   screen: 'home',
@@ -1020,7 +1020,7 @@ function openTxForm(tx) {
         </div>
         <input id="tx-desc" type="text" placeholder="${t.type === 'transfer' ? 'например: перевод' : (t.type === 'income' ? 'например: зарплата' : 'например: покупки')}" value="${esc(t.description)}">
         <input id="tx-receipt-url" type="hidden" value="${esc(t.receiptUrl || '')}">
-        <div id="tx-receipt-preview" class="receipt-attached-row" style="${(t.receiptUrl || (t.receiptItems && t.receiptItems.length)) ? '' : 'display:none'}">
+        <div id="tx-receipt-preview" class="receipt-attached-row" style="${t.receiptUrl ? '' : 'display:none'}">
           <span>🧾 Чек прикреплён</span>
           <a href="${esc(t.receiptUrl || '')}" id="tx-receipt-link" target="_blank" rel="noopener" class="receipt-link-btn" ${t.receiptUrl ? '' : 'style="display:none"'}>Открыть оригинал ↗</a>
           <button type="button" class="receipt-del-btn" data-action="remove-tx-receipt" title="Открепить чек">✕</button>
@@ -1884,12 +1884,6 @@ function paySubscription(id) {
   const s = state.subscriptions.find((x) => x.id === id);
   if (!s) return;
   const credit = isCredit(s);
-  state.transactions.push({
-    id: uid(), ts: Date.now(), type: 'expense',
-    amount: s.amount, currency: s.currency,
-    categoryId: credit ? 'credit' : 'subs', description: s.name,
-    date: todayISO(), source: 'manual', sourceId: null,
-  });
 
   if (credit) {
     s.plan.paid = Math.min(s.plan.paid + 1, s.plan.total);
@@ -1904,19 +1898,13 @@ function paySubscription(id) {
   s.nextDate = addPeriod(s.nextDate, s.period);
   save(); render();
   toast(credit
-    ? `Платёж ${s.plan.paid} из ${s.plan.total} записан`
-    : 'Записано в расходы, дата сдвинута');
+    ? `Платёж ${s.plan.paid} из ${s.plan.total} отмечен (следующий: ${fmtDay(s.nextDate)})`
+    : `Дата платежа сдвинута: ${fmtDay(s.nextDate)}`);
 }
 
 function paySubscriptionEarly(id) {
   const s = state.subscriptions.find((x) => x.id === id);
   if (!s || !isCredit(s)) return;
-  state.transactions.push({
-    id: uid(), ts: Date.now(), type: 'expense',
-    amount: s.amount, currency: s.currency,
-    categoryId: 'credit', description: `${s.name} (досрочно)`,
-    date: todayISO(), source: 'manual', sourceId: null,
-  });
 
   s.plan.paid = Math.min(s.plan.paid + 1, s.plan.total);
   if (s.plan.paid >= s.plan.total) {
@@ -1929,7 +1917,7 @@ function paySubscriptionEarly(id) {
   // Сдвигаем дату следующего платежа на следующий месяц
   s.nextDate = addPeriod(s.nextDate, s.period);
   save(); render();
-  toast(`Досрочный платёж ${s.plan.paid} из ${s.plan.total} записан, следующий: ${fmtDay(s.nextDate)}`);
+  toast(`Досрочный платёж ${s.plan.paid} из ${s.plan.total} отмечен (следующий: ${fmtDay(s.nextDate)})`);
 }
 
 async function handleRateRefresh(btn) {
