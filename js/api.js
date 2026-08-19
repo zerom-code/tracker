@@ -10,8 +10,8 @@ async function fetchRateOnline(force) {
       const list = await res.json();
       const usd = list.find((r) => r.currencyCodeA === 840 && r.currencyCodeB === 980);
       if (usd) {
-        // Курс Monobank: rateSell (курс продажи доллара клиенту) или rateCross / средний
-        const rate = usd.rateSell || usd.rateCross || (usd.rateBuy && usd.rateSell ? (usd.rateBuy + usd.rateSell) / 2 : usd.rateBuy);
+        // Курс Monobank: rateBuy (реальная стоимость гривневых расходов в валюте)
+        const rate = usd.rateBuy || usd.rateCross || usd.rateSell;
         if (rate > 0) return { usdUah: rate, source: 'Monobank' };
       }
     }
@@ -22,7 +22,7 @@ async function fetchRateOnline(force) {
     return { usdUah: state.rate.usdUah, source: 'Monobank' };
   }
 
-  return { usdUah: 44.85, source: 'Monobank' };
+  return { usdUah: 44.60, source: 'Monobank' };
 }
 
 async function refreshRate(force) {
