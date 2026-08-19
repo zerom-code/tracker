@@ -134,6 +134,7 @@ function mapMonoItem(item, currency, accountId) {
   const isCredit = !isIncome && isCreditPayment(desc);
   const isTransfer = !isIncome && !isCredit && TRANSFER_MCC.includes(item.mcc);
   const type = isIncome ? 'income' : (isTransfer ? 'transfer' : 'expense');
+  const when = new Date((item.time || Math.floor(Date.now() / 1000)) * 1000);
   let txCurrency = currency || 'UAH';
   let txAmount = Math.abs(item.amount) / 100;
   let alt = monoAltOf(item, txCurrency);
