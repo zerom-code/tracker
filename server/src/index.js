@@ -174,39 +174,64 @@ async function route(req, res, url, origin) {
       let targetTime = time;
       let targetSm = sm;
 
-      if (rawUrl && (!targetFn || !targetId)) {
+      function normalizeDate(d) {
+        if (!d) return '';
+        const s = String(d).trim();
+        if (s.length === 8 && !s.includes('-') && !s.includes('.')) {
+          return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+        }
+        if (s.includes('.')) {
+          const parts = s.split('.');
+          if (parts[2] && parts[2].length === 4) {
+            return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          }
+        }
+        return s;
+      }
+
+      function normalizeTime(t) {
+        if (!t) return '';
+        const s = String(t).trim();
+        if (s.includes(':')) {
+          const parts = s.split(':');
+          const hh = parts[0].padStart(2, '0');
+          const mm = (parts[1] || '00').padStart(2, '0');
+          const ss = (parts[2] || '00').padStart(2, '0');
+          return `${hh}:${mm}:${ss}`;
+        }
+        if (s.length === 6) {
+          return `${s.slice(0, 2)}:${s.slice(2, 4)}:${s.slice(4, 6)}`;
+        }
+        if (s.length === 4) {
+          return `${s.slice(0, 2)}:${s.slice(2, 4)}:00`;
+        }
+        return s;
+      }
+
+      if (rawUrl) {
         try {
           const parsedUrl = new URL(rawUrl);
           targetFn = targetFn || parsedUrl.searchParams.get('fn') || '';
           targetId = targetId || parsedUrl.searchParams.get('id') || '';
           const d = parsedUrl.searchParams.get('date') || '';
-          if (d.length === 8) {
-            targetDate = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-          }
+          if (d) targetDate = targetDate || normalizeDate(d);
           const t = parsedUrl.searchParams.get('time') || '';
-          if (t.length === 6) {
-            targetTime = `${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}`;
-          }
+          if (t) targetTime = targetTime || normalizeTime(t);
           targetSm = targetSm || parsedUrl.searchParams.get('sm') || '';
         } catch (e) {}
       }
 
+      targetDate = normalizeDate(targetDate);
+      targetTime = normalizeTime(targetTime);
+
       if (targetFn && targetId) {
-        let cleanId = String(targetId).trim();
-        let cleanTime = String(targetTime || '').trim();
-        if (cleanTime.length === 4) {
-          cleanTime = `${cleanTime.slice(0, 2)}:${cleanTime.slice(2, 4)}:00`;
-        } else if (cleanTime.length === 5) {
-          cleanTime = `${cleanTime}:00`;
-        } else if (cleanTime.length === 6 && !cleanTime.includes(':')) {
-          cleanTime = `${cleanTime.slice(0, 2)}:${cleanTime.slice(2, 4)}:${cleanTime.slice(4, 6)}`;
-        }
-
+        const cleanId = String(targetId).trim();
         const idNoZeros = cleanId.replace(/^0+/, '');
-        const idPadded = cleanId.padStart(7, '0');
-        const idList = [...new Set([cleanId, idNoZeros, idPadded].filter(Boolean))];
+        const idPadded7 = /^\d+$/.test(cleanId) ? cleanId.padStart(7, '0') : cleanId;
+        const idPadded8 = /^\d+$/.test(cleanId) ? cleanId.padStart(8, '0') : cleanId;
+        const idList = [...new Set([cleanId, idNoZeros, idPadded7, idPadded8].filter(Boolean))];
 
-        const dateWithTime = targetDate ? `${targetDate} ${cleanTime || '00:00:00'}`.trim() : '';
+        const dateWithTime = targetDate ? (targetTime ? `${targetDate} ${targetTime}` : `${targetDate} 00:00:00`) : '';
         const dateOnly = targetDate;
         const dateList = [...new Set([dateWithTime, dateOnly].filter(Boolean))];
 

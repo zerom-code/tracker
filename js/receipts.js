@@ -30,18 +30,33 @@ function parseReceiptQr(raw) {
       const timeRaw = url.searchParams.get('time') || '';
       const mac = url.searchParams.get('mac') || '';
 
-      // Преобразование даты (YYYYMMDD -> YYYY-MM-DD)
+      // Преобразование даты (YYYYMMDD, YYYY-MM-DD, DD.MM.YYYY)
       let date = '';
-      if (dateRaw.length === 8) {
+      if (dateRaw.length === 8 && !dateRaw.includes('-') && !dateRaw.includes('.')) {
         date = `${dateRaw.slice(0, 4)}-${dateRaw.slice(4, 6)}-${dateRaw.slice(6, 8)}`;
+      } else if (dateRaw.includes('.')) {
+        const parts = dateRaw.split('.');
+        if (parts[2] && parts[2].length === 4) {
+          date = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      } else if (dateRaw) {
+        date = dateRaw;
       }
 
-      // Преобразование времени (HHmmss -> HH:mm:ss или HHmm -> HH:mm:00)
+      // Преобразование времени (HH:mm:ss, HHmmss, HH:mm, HHmm)
       let time = '';
-      if (timeRaw.length === 6) {
+      if (timeRaw.includes(':')) {
+        const parts = timeRaw.split(':');
+        const hh = parts[0].padStart(2, '0');
+        const mm = (parts[1] || '00').padStart(2, '0');
+        const ss = (parts[2] || '00').padStart(2, '0');
+        time = `${hh}:${mm}:${ss}`;
+      } else if (timeRaw.length === 6) {
         time = `${timeRaw.slice(0, 2)}:${timeRaw.slice(2, 4)}:${timeRaw.slice(4, 6)}`;
       } else if (timeRaw.length === 4) {
         time = `${timeRaw.slice(0, 2)}:${timeRaw.slice(2, 4)}:00`;
+      } else if (timeRaw) {
+        time = timeRaw;
       }
 
       const amount = parseFloat(sm.replace(',', '.')) || null;
@@ -120,22 +135,23 @@ function parseReceiptQr(raw) {
  */
 function cleanProductName(name) {
   if (!name || typeof name !== 'string') return '';
-  let cleaned = name.trim();
+  let cleaned = name.trim().replace(/\s+/g, ' ');
   cleaned = cleaned.replace(/([A-ZА-ЯІЇЄҐ])([A-ZА-ЯІЇЄҐ][a-zа-яіїєґ])/g, '$1 $2');
   cleaned = cleaned.replace(/([a-zа-яіїєґ0-9])([A-ZА-ЯІЇЄҐ])/g, '$1 $2');
   return cleaned.replace(/\s+/g, ' ').trim();
 }
 
 /**
- * Разбирает XML фискального чека ДПС (формат DATECS/РРО).
+ * Разбирает XML фискального чека ДПС (формат DATECS/РРО/ПРРО).
  */
 function parseFiscalXml(xmlString) {
   if (!xmlString || typeof xmlString !== 'string') return null;
-  if (!xmlString.includes('<RQ') && !xmlString.includes('<DAT') && !xmlString.includes('<P ') && !xmlString.includes('<C ')) {
+  if (!xmlString.includes('<RQ') && !xmlString.includes('<DAT') && !xmlString.includes('<P ') && !xmlString.includes('<C ') && !xmlString.includes('<ROW')) {
     return null;
   }
 
   const items = [];
+  // 1. Формат <P NM="..." SM="4149" Q="1000" PRC="4149"/>
   const pRegex = /<P\b([^>]+)\/?>/gi;
   let pMatch;
   while ((pMatch = pRegex.exec(xmlString)) !== null) {
@@ -154,10 +170,34 @@ function parseFiscalXml(xmlString) {
     }
   }
 
+  // 2. Универсальный формат <ROW NAME="..." PRICE="..." QNT="..." SUM="..."/> или <ITEM ...>
+  const rowRegex = /<(?:ROW|CHECK_ROW|GOODS_ROW|ITEM)\b([^>]+)\/?>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(xmlString)) !== null) {
+    const attrs = rowMatch[1];
+    const nameMatch = attrs.match(/(?:NAME|GOODS_NAME|NAME_TOVAR|NM)="([^"]+)"/i);
+    const prcMatch = attrs.match(/(?:PRICE|PRC|COST)="([^"]+)"/i);
+    const qMatch = attrs.match(/(?:QNT|QUANTITY|Q|COUNT)="([^"]+)"/i);
+    const smMatch = attrs.match(/(?:SUM|SM|TOTAL)="([^"]+)"/i);
+
+    if (nameMatch) {
+      const name = cleanProductName(nameMatch[1]);
+      let price = prcMatch ? parseFloat(prcMatch[1].replace(',', '.')) : 0;
+      let quantity = qMatch ? parseFloat(qMatch[1].replace(',', '.')) : 1;
+      let total = smMatch ? parseFloat(smMatch[1].replace(',', '.')) : (price * quantity);
+      if (price > 1000 && !prcMatch[1].includes('.')) price /= 100;
+      if (quantity >= 1000 && !qMatch[1].includes('.')) quantity /= 1000;
+      if (total > 1000 && !smMatch[1].includes('.')) total /= 100;
+      items.push({ name, price, quantity, total });
+    }
+  }
+
   const fnMatch = xmlString.match(/FN="([^"]+)"/i);
-  const noMatch = xmlString.match(/NO="([^"]+)"/i);
+  const noMatch = xmlString.match(/(?:NO|DI|ID)="([^"]+)"/i);
   const tsMatch = xmlString.match(/TS="([^"]+)"/i);
-  const smMatch = xmlString.match(/<E\b[^>]*SM="([^"]+)"/i) || xmlString.match(/<M\b[^>]*SM="([^"]+)"/i);
+  const mMatch = xmlString.match(/<M\b[^>]*SM="([^"]+)"/i);
+  const eMatch = xmlString.match(/<E\b[^>]*SM="([^"]+)"/i);
+  const smMatch = mMatch || eMatch || xmlString.match(/SUM="([^"]+)"/i);
 
   let date = '';
   let time = '';
@@ -220,8 +260,8 @@ function parseReceiptText(txt) {
     const fnM = line.match(/(?:РРО\s+)?(?:ПРРО\s+)?ФН\s*(\d{8,12})/i);
     if (fnM && !fn) fn = fnM[1];
 
-    // Номер чека (Чек № 001292789 или Чек 2574394 или ЧЕК ФН ...)
-    const idM = line.match(/ЧЕК\s+(?:ФН\s+)?(?:№\s*)?(\d+)/i) || line.match(/ЧЕК\s+(\d+)/i);
+    // Номер чека (Чек № 001292789 или Чек 2574394 или ЧЕК ФН jkBeWTq9kD4)
+    const idM = line.match(/ЧЕК\s+(?:ФН\s+)?(?:№\s*)?([a-zA-Z0-9_-]+)/i) || line.match(/ЧЕК\s+([a-zA-Z0-9_-]+)/i);
     if (idM && !id) id = idM[1];
 
     // Конец товарной части чека (итоги / подвал)

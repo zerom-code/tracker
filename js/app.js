@@ -1,6 +1,6 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '62';
+const APP_VERSION = '63';
 const now = new Date();
 const ui = {
   screen: 'home',
