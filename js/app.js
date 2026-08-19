@@ -1,9 +1,11 @@
 /* Интерфейс: отрисовка экранов, формы, обработка действий. */
 
-const APP_VERSION = '64';
+const APP_VERSION = '65';
 const now = new Date();
+const VALID_SCREENS = ['home', 'ops', 'subs', 'debts', 'settings'];
+const initHash = (location.hash || '').replace(/^#/, '');
 const ui = {
-  screen: 'home',
+  screen: VALID_SCREENS.includes(initHash) ? initHash : 'home',
   opsFilter: 'all',            // all | expense | transfer | income
   opsCategory: null,           // null | categoryId
   opsY: now.getFullYear(),
@@ -207,8 +209,8 @@ function renderOps() {
 
     if (opsCategory) {
       if (t.type === 'transfer') return false;
-      const catId = t.categoryId || FALLBACK_CATEGORY;
-      if (catId !== opsCategory) return false;
+      const effectiveCat = categoryById(t.categoryId || FALLBACK_CATEGORY);
+      if (effectiveCat.id !== opsCategory) return false;
     }
     return true;
   };
@@ -844,8 +846,10 @@ function runTapTest(btn) {
 
 let activeScannerStream = null;
 let scanAnimTimer = null;
+let isScannerOpen = false;
 
 function stopScannerCamera() {
+  isScannerOpen = false;
   if (scanAnimTimer) {
     clearInterval(scanAnimTimer);
     scanAnimTimer = null;
@@ -966,7 +970,7 @@ function captureCurrentTxForm() {
     date: document.getElementById('tx-date') ? document.getElementById('tx-date').value : todayISO(),
     internal: document.getElementById('tx-internal') ? document.getElementById('tx-internal').checked : false,
     receiptUrl: receiptUrlEl ? receiptUrlEl.value : (original ? original.receiptUrl : ''),
-    receiptItems: rows.length > 0 ? items : ((ui.tempTxForm && ui.tempTxForm.receiptItems) || (original ? original.receiptItems : null) || []),
+    receiptItems: document.getElementById('tx-items-list') ? items : ((ui.tempTxForm && ui.tempTxForm.receiptItems) || (original ? original.receiptItems : null) || []),
     source: original ? original.source : 'manual',
     sourceId: original ? original.sourceId : null,
   };
@@ -1042,7 +1046,7 @@ function openTxForm(tx) {
           ${(t.receiptItems || []).map((it) => `
             <div class="tx-item-row" style="display:flex;gap:6px;align-items:center">
               <input type="text" class="tx-item-name" placeholder="Название товара" value="${esc(it.name || '')}" style="flex:2;padding:7px 10px;font-size:13px">
-              <input type="text" inputmode="decimal" class="tx-item-price" placeholder="Цена" value="${it.price || it.total || ''}" style="flex:1;padding:7px 8px;font-size:13px">
+              <input type="text" inputmode="decimal" class="tx-item-price" placeholder="Цена" value="${esc(it.price || it.total || '')}" style="flex:1;padding:7px 8px;font-size:13px">
               <button type="button" class="receipt-del-btn" data-action="del-tx-item" title="Удалить" style="color:var(--red);padding:4px 8px">✕</button>
             </div>
           `).join('')}
@@ -1089,11 +1093,12 @@ function submitTxForm(form) {
   if (id) {
     const t = state.transactions.find((x) => x.id === id);
     if (!t) return;
-    Object.assign(t, { type, amount, currency, date, description, categoryId, internal, altAmount, altCurrency, receiptUrl, receiptItems });
+    const userEditedInternal = t.internal !== internal || Boolean(t.userEditedInternal);
+    Object.assign(t, { type, amount, currency, date, description, categoryId, internal, userEditedInternal, altAmount, altCurrency, receiptUrl, receiptItems });
   } else {
     state.transactions.push({
       id: uid(), ts: Date.now(), type, amount, currency, date, description, categoryId,
-      internal, altAmount, altCurrency, receiptUrl, receiptItems, source: 'manual', sourceId: null,
+      internal, userEditedInternal: true, altAmount, altCurrency, receiptUrl, receiptItems, source: 'manual', sourceId: null,
     });
   }
   const [ty, tm] = date.split('-').map(Number);
@@ -1242,6 +1247,7 @@ async function sendAiChatMessage(text) {
 
 function openQrScannerModal() {
   stopScannerCamera();
+  isScannerOpen = true;
   const hasCamera = typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
 
   openSheet(`
@@ -1304,6 +1310,10 @@ function openQrScannerModal() {
   navigator.mediaDevices.getUserMedia({
     video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
   }).then((stream) => {
+    if (!isScannerOpen) {
+      stream.getTracks().forEach((tr) => tr.stop());
+      return;
+    }
     activeScannerStream = stream;
     if (video) {
       video.srcObject = stream;
@@ -1509,14 +1519,15 @@ function submitSubForm(form) {
     period: segValue('#sub-period-seg') || 'month',
     nextDate: document.getElementById('sub-date').value || todayISO(),
   };
+  const preferredDay = parseISO(data.nextDate).getDate();
   const activeEl = document.getElementById('sub-active');
   const id = form.dataset.id;
   if (id) {
     const s = state.subscriptions.find((x) => x.id === id);
     if (!s) return;
-    Object.assign(s, data, { active: activeEl ? activeEl.checked : s.active });
+    Object.assign(s, data, { preferredDay, active: activeEl ? activeEl.checked : s.active });
   } else {
-    state.subscriptions.push({ id: uid(), ...data, active: true });
+    state.subscriptions.push({ id: uid(), ...data, preferredDay, active: true });
   }
   save(); closeSheet(); render();
 }
@@ -1677,12 +1688,29 @@ function submitDebtForm(form) {
       ? `Вы должны «${opposite.person}» ${fmtMoney(rem, currency)}.\n\nЗачесть ${fmtMoney(offset, currency)} в счёт вашего долга? Запись о встречном долге сохранится.`
       : `«${opposite.person}» должен вам ${fmtMoney(rem, currency)}.\n\nЗачесть ${fmtMoney(offset, currency)} в счёт его долга? Запись о вашем долге сохранится.`;
     if (confirm(msg)) {
-      opposite.payments.push({ id: uid(), amount: offset, date, note: 'Взаимозачёт' });
+      const oppPaymentId = uid();
+      const newPaymentId = uid();
+      const newDebtId = uid();
+      opposite.payments.push({
+        id: oppPaymentId,
+        amount: offset,
+        date,
+        note: 'Взаимозачёт',
+        linkedDebtId: newDebtId,
+        linkedPaymentId: newPaymentId,
+      });
       opposite.settled = debtRemaining(opposite) <= 0.005;
       const newDebt = {
-        id: uid(), direction, person, currency, date, settled: false,
+        id: newDebtId, direction, person, currency, date, settled: false,
         entries: [{ id: uid(), amount, description, date }],
-        payments: [{ id: uid(), amount: offset, date, note: 'Взаимозачёт' }],
+        payments: [{
+          id: newPaymentId,
+          amount: offset,
+          date,
+          note: 'Взаимозачёт',
+          linkedDebtId: opposite.id,
+          linkedPaymentId: oppPaymentId,
+        }],
       };
       newDebt.settled = debtRemaining(newDebt) <= 0.005;
       state.debts.push(newDebt);
@@ -1895,7 +1923,7 @@ function paySubscription(id) {
     }
   }
 
-  s.nextDate = addPeriod(s.nextDate, s.period);
+  s.nextDate = addPeriod(s.nextDate, s.period, s.preferredDay);
   save(); render();
   toast(credit
     ? `Платёж ${s.plan.paid} из ${s.plan.total} отмечен (следующий: ${fmtDay(s.nextDate)})`
@@ -1915,7 +1943,7 @@ function paySubscriptionEarly(id) {
   }
 
   // Сдвигаем дату следующего платежа на следующий месяц
-  s.nextDate = addPeriod(s.nextDate, s.period);
+  s.nextDate = addPeriod(s.nextDate, s.period, s.preferredDay);
   save(); render();
   toast(`Досрочный платёж ${s.plan.paid} из ${s.plan.total} отмечен (следующий: ${fmtDay(s.nextDate)})`);
 }
@@ -2164,7 +2192,7 @@ document.addEventListener('click', async (e) => {
   const navBtn = e.target.closest('[data-nav]');
   if (navBtn) {
     ui.screen = navBtn.dataset.nav;
-    history.replaceState(null, '', '#' + ui.screen);
+    history.pushState(null, '', '#' + ui.screen);
     render();
     screenEl.scrollTop = 0;
     return;
@@ -2435,7 +2463,8 @@ document.addEventListener('click', async (e) => {
         const storeHint = ui.tempTxForm ? (ui.tempTxForm.description || '') : '';
         const descInput = document.getElementById('preview-receipt-desc');
         const description = descInput ? descInput.value.trim() : (storeHint || formatReceiptDescription(r, storeHint));
-        const amount = r.amount || (ui.tempTxForm && ui.tempTxForm.amount) || 0;
+        const rawAmount = r.amount != null ? r.amount : (ui.tempTxForm && ui.tempTxForm.amount);
+        const amount = typeof rawAmount === 'number' ? rawAmount : (parseAmount(rawAmount) || 0);
         const date = r.date || (ui.tempTxForm && ui.tempTxForm.date) || todayISO();
         const store = r.storeName || storeHint || '';
         const categoryId = detectCategoryFromItems(r.items || [], store);
@@ -2580,6 +2609,14 @@ document.addEventListener('click', async (e) => {
       const d = state.debts.find((x) => x.id === debt);
       if (!d) break;
       if (confirm('Удалить погашение?')) {
+        const p = d.payments.find((x) => x.id === id);
+        if (p && p.linkedDebtId && p.linkedPaymentId) {
+          const otherDebt = state.debts.find((x) => x.id === p.linkedDebtId);
+          if (otherDebt) {
+            otherDebt.payments = otherDebt.payments.filter((x) => x.id !== p.linkedPaymentId);
+            recalcDebtSettled(otherDebt);
+          }
+        }
         d.payments = d.payments.filter((x) => x.id !== id);
         recalcDebtSettled(d);
         save(); render(); openDebtForm(d);
@@ -2603,6 +2640,18 @@ document.addEventListener('click', async (e) => {
       break;
     case 'del-debt':
       if (confirm('Удалить долг?')) {
+        const d = state.debts.find((x) => x.id === id);
+        if (d) {
+          for (const p of d.payments || []) {
+            if (p.linkedDebtId && p.linkedPaymentId) {
+              const otherDebt = state.debts.find((x) => x.id === p.linkedDebtId);
+              if (otherDebt) {
+                otherDebt.payments = otherDebt.payments.filter((x) => x.id !== p.linkedPaymentId);
+                recalcDebtSettled(otherDebt);
+              }
+            }
+          }
+        }
         state.debts = state.debts.filter((d) => d.id !== id);
         save(); closeSheet(); render();
       }
@@ -2842,17 +2891,26 @@ function keyboardHeight(appH) {
   return gap > 120 ? Math.round(gap) : 0;
 }
 
+let appHeightRaf = null;
 function setAppHeight() {
   const h = Math.round(appHeight());
   const root = document.documentElement;
   root.style.setProperty('--app-h', h + 'px');
   root.style.setProperty('--kb-h', keyboardHeight(h) + 'px');
 }
-window.addEventListener('resize', setAppHeight);
-window.addEventListener('orientationchange', setAppHeight);
+
+function scheduleSetAppHeight() {
+  if (appHeightRaf) return;
+  appHeightRaf = requestAnimationFrame(() => {
+    appHeightRaf = null;
+    setAppHeight();
+  });
+}
+
+window.addEventListener('resize', scheduleSetAppHeight);
+window.addEventListener('orientationchange', scheduleSetAppHeight);
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', setAppHeight);
-  window.visualViewport.addEventListener('scroll', setAppHeight);
+  window.visualViewport.addEventListener('resize', scheduleSetAppHeight);
 }
 setAppHeight();
 
@@ -2914,6 +2972,19 @@ document.addEventListener('visibilitychange', () => {
 // проверяем и уже накопленные операции — вдруг среди них есть возврат долга
 setTimeout(offerDebtSuggestions, 1200);
 setInterval(() => { if (!document.hidden) backgroundSync(); }, 60_000);
+
+window.addEventListener('popstate', () => {
+  if (modalRoot.innerHTML) {
+    closeSheet();
+  }
+  const rawHash = (location.hash || '').replace(/^#/, '');
+  const targetScreen = (!rawHash || rawHash === 'home') ? 'home' : (VALID_SCREENS.includes(rawHash) ? rawHash : 'home');
+  if (ui.screen !== targetScreen) {
+    ui.screen = targetScreen;
+    render();
+    screenEl.scrollTop = 0;
+  }
+});
 
 if ('serviceWorker' in navigator &&
     (location.protocol === 'https:' || location.hostname === 'localhost')) {

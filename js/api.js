@@ -172,16 +172,28 @@ function mapMonoItem(item, currency, accountId) {
 function pairInternalTransfers() {
   const WINDOW = 3 * 60 * 1000;
   const TOLERANCE = 0.08;
-  const candidates = state.transactions.filter((t) => t.source === 'mono' && !t.internal);
+  const knownAccountIds = new Set((state.mono.accounts || []).map((a) => a.id).filter(Boolean));
+  const candidates = state.transactions.filter((t) => t.source === 'mono' && !t.internal && !t.userEditedInternal);
   const outs = candidates.filter((t) => t.type === 'transfer');
   const ins = candidates.filter((t) => t.type === 'income');
   let linked = 0;
 
   for (const out of outs) {
     for (const inn of ins) {
-      if (inn.internal) continue;
-      if (out.accountId && inn.accountId && out.accountId === inn.accountId) continue;
+      if (inn.internal || inn.userEditedInternal) continue;
       if (Math.abs((out.ts || 0) - (inn.ts || 0)) > WINDOW) continue;
+
+      if (knownAccountIds.size > 0) {
+        // Оба счета должны быть известны, принадлежать пользователю и отличаться друг от друга
+        if (!out.accountId || !inn.accountId || !knownAccountIds.has(out.accountId) || !knownAccountIds.has(inn.accountId) || out.accountId === inn.accountId) {
+          continue;
+        }
+      } else {
+        // Если счета неизвестны, требуем явного подтверждения в описании
+        const isInternalDesc = /сво[юя]|між своїми|власн/i.test(out.description || '') ||
+                               /сво[юя]|між своїми|власн/i.test(inn.description || '');
+        if (!isInternalDesc) continue;
+      }
 
       let match = false;
       if (out.currency === inn.currency) {

@@ -83,7 +83,7 @@ async function syncOps() {
     added++;
   }
 
-  state.sync.cursor = data.cursor || since;
+  state.sync.cursor = (typeof data.cursor === 'number') ? data.cursor : since;
   state.sync.lastAt = Date.now();
   save();
   if (added) pairInternalTransfers();

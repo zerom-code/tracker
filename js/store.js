@@ -68,30 +68,6 @@ function migrateTransactions(txs) {
       updated.categoryId = 'credit';
     }
 
-    // 2. Исправление операций, где валюта ошибочно стала USD вместо UAH
-    if (updated.currency === 'USD') {
-      const isUahMerchant = /varus|варус|атб|atb|сільпо|сильпо|нова\s*пошта|novapay|новапей|розетка|rozetka|фора|fora|аптека|єва|eva|prostor|окко|okko|wog|вог|комфі|comfy|алло|allo|foxtrot|фокстрот|епіцентр|эпицентр|epicentr|metro|метро|ашан|auchan|велика|кишеня/i.test(updated.description || '');
-      const hasReceipt = Boolean(updated.receiptUrl || (updated.receiptItems && updated.receiptItems.length));
-      const sameAlt = updated.altCurrency === 'UAH' && updated.altAmount && Math.abs(updated.amount - updated.altAmount) < 0.05;
-
-      // Если сумма в долларах совпадает с гривневой (например 258.01 $ и 258.01 ₴), или это чек, или украинский магазин
-      if (sameAlt || hasReceipt || (isUahMerchant && updated.amount > 30)) {
-        updated.currency = 'UAH';
-        if (updated.altCurrency === 'UAH') {
-          updated.altAmount = null;
-          updated.altCurrency = null;
-        }
-      } else if (isUahMerchant && updated.altCurrency === 'UAH' && updated.altAmount && updated.altAmount > updated.amount) {
-        // Случай с конвертацией (например 16.42 USD и 730.14 UAH): восстанавливаем 730.14 как основную сумму в UAH
-        const uahAmount = updated.altAmount;
-        const usdAmount = updated.amount;
-        updated.currency = 'UAH';
-        updated.amount = uahAmount;
-        updated.altAmount = usdAmount;
-        updated.altCurrency = 'USD';
-      }
-    }
-
     return updated;
   });
 }
@@ -134,10 +110,13 @@ function mergeCategories(saved, base) {
 }
 
 let state = load();
-save();
 
 function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.error('Ошибка сохранения данных в localStorage:', e);
+  }
 }
 
 function uid() {
@@ -180,13 +159,18 @@ function fmtDay(iso) {
   return d.getDate() + ' ' + MONTHS_RU_GEN[d.getMonth()] + year;
 }
 
-function addPeriod(iso, period) {
+function addPeriod(iso, period, preferredDay) {
   const d = parseISO(iso);
+  const origMonth = d.getMonth();
+  const day = preferredDay || d.getDate();
   if (period === 'year') {
+    d.setDate(1);
     d.setFullYear(d.getFullYear() + 1);
+    d.setMonth(origMonth);
+    const maxDay = new Date(d.getFullYear(), origMonth + 1, 0).getDate();
+    d.setDate(Math.min(day, maxDay));
     return toISO(d);
   }
-  const day = d.getDate();
   d.setDate(1);
   d.setMonth(d.getMonth() + 1);
   const maxDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
@@ -208,13 +192,12 @@ function fmtMoney(n, currency) {
 }
 
 function effectiveRate() {
-  return state.settings.manualRate || state.rate.usdUah || 0;
+  return state.settings.manualRate || (state.rate && (state.rate.usd || state.rate.usdUah)) || null;
 }
 
 function convert(amount, from, to) {
   if (from === to) return amount;
-  const rate = effectiveRate();
-  if (!rate) return 0;
+  const rate = effectiveRate() || 44.0;
   return from === 'USD' ? amount * rate : amount / rate;
 }
 
@@ -258,11 +241,8 @@ function isOutflow(t) {
 /* Сумма операции в валюте учёта. */
 function txBase(t) {
   if (t.currency === state.settings.baseCurrency) return t.amount;
-  if (t.altAmount && t.altCurrency === state.settings.baseCurrency) {
-    const expected = toBase(t.amount, t.currency);
-    if (expected > 0 && Math.abs(t.altAmount - expected) / expected < 0.2) {
-      return t.altAmount;
-    }
+  if (t.altAmount && t.altCurrency === state.settings.baseCurrency && t.altAmount > 0) {
+    return t.altAmount;
   }
   return toBase(t.amount, t.currency);
 }
@@ -284,7 +264,8 @@ function activeSubs() {
 
 /* Миграция: у подписок, заведённых до появления рассрочек, плана платежей нет */
 function normalizeSub(s) {
-  return { plan: null, ...s };
+  const day = (s && typeof s.preferredDay === 'number') ? s.preferredDay : (s && s.nextDate ? parseISO(s.nextDate).getDate() : 1);
+  return { ...s, plan: s && s.plan ? s.plan : null, preferredDay: day };
 }
 
 function isCredit(s) {

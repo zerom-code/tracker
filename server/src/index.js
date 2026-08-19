@@ -5,6 +5,8 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import net from 'node:net';
+import dns from 'node:dns/promises';
 import { config, webhookPath, webhookUrl } from './config.js';
 import { Store } from './store.js';
 import { buildOpNotification, shouldNotify } from './notify.js';
@@ -58,6 +60,40 @@ function tokenOk(given) {
   const a = Buffer.from(String(given));
   const b = Buffer.from(config.deviceToken);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function isPrivateIp(ip) {
+  if (!net.isIP(ip)) return true;
+  if (ip === '127.0.0.1' || ip === '::1' || ip === '0.0.0.0' || ip === '::' || ip === '169.254.169.254') return true;
+  // IPv4 loopback & private ranges (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 0.0.0.0/8)
+  if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.') || ip.startsWith('0.')) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) return true;
+  // IPv6 loopback, link-local (fe80::/10), unique local (fc00::/7, fd00::/8)
+  if (/^(fe8|fe9|fea|feb|fc|fd)/i.test(ip)) return true;
+  return false;
+}
+
+/* Валидация URL чека для защиты от SSRF (DNS Resolution, alternate IP notations, private IP) */
+async function isAllowedReceiptUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    
+    // Блокируем альтернативные числовые/hex/octal/сокращенные нотации IP
+    if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host) || /^\d+\.\d+$/.test(host) || /^\d+\.\d+\.\d+$/.test(host)) return false;
+    if (host === 'localhost' || host.endsWith('.internal') || host.endsWith('.local') || host.endsWith('.lan') || host.endsWith('.corp')) return false;
+
+    // Резолвим DNS и проверяем каждый полученный IP
+    const addresses = await dns.lookup(host, { all: true });
+    if (!addresses || !addresses.length) return false;
+    for (const entry of addresses) {
+      if (isPrivateIp(entry.address)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* Простое ограничение частоты: защита от перебора токена */
@@ -450,6 +486,28 @@ async function route(req, res, url, origin) {
             }, origin);
           }
         }
+      
+      // Если параметры ДПС отсутствуют или чек не найден, пробуем прямое проксирование URL
+      if (rawUrl) {
+        if (!(await isAllowedReceiptUrl(rawUrl))) {
+          return json(res, 400, { success: false, error: 'Недопустимый или приватный URL чека' }, origin);
+        }
+        try {
+          const response = await fetch(rawUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+              'Accept': 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
+            },
+            redirect: 'error',
+            signal: AbortSignal.timeout(8000),
+          });
+          const text = await response.text();
+          return json(res, 200, { success: true, text }, origin);
+        } catch (e) {
+          return json(res, 200, { success: false, error: e.message }, origin);
+        }
+      }
+
       return json(res, 200, { success: false, error: 'Чек не найден в ДПС' }, origin);
     } catch (err) {
       console.error('[receipt] error:', err.message);
@@ -501,24 +559,6 @@ async function route(req, res, url, origin) {
     return json(res, 200, { ok: true, reminders: count }, origin);
   }
 
-  if (path === '/api/receipt' && req.method === 'GET') {
-    const targetUrl = url.searchParams.get('url');
-    if (!targetUrl) return json(res, 400, { error: 'url required' }, origin);
-    try {
-      const response = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
-          'Accept': 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
-        },
-        signal: AbortSignal.timeout(8000),
-      });
-      const text = await response.text();
-      return json(res, 200, { success: true, text }, origin);
-    } catch (e) {
-      return json(res, 200, { success: false, error: e.message }, origin);
-    }
-  }
-
   return json(res, 404, { error: 'not found' }, origin);
 }
 
@@ -546,14 +586,23 @@ setInterval(() => { tickReminders().catch((e) => console.error('[reminder]', e.m
 
 const server = http.createServer((req, res) => {
   const origin = req.headers.origin;
-  const ip = req.socket.remoteAddress || '?';
-  if (rateLimited(ip)) return json(res, 429, { error: 'слишком много запросов' }, origin);
+  const socketIp = req.socket.remoteAddress || '?';
+  const xForwarded = req.headers['x-forwarded-for'];
+  // Используем последний IP из цепочки прокси (ближайший к серверу) либо прямой сокет
+  const ip = xForwarded ? xForwarded.split(',').pop().trim() : socketIp;
 
   const url = new URL(req.url, 'http://localhost');
+  const token = req.headers['x-device-token'];
+  const isAuthenticated = tokenOk(token);
+  const isWebhook = url.pathname.startsWith('/hook/') || url.pathname === webhookPath;
+
+  // Ограничиваем только неавторизованные запросы (кроме легитимного вебхука Monobank)
+  if (!isAuthenticated && !isWebhook && rateLimited(ip, 120, 60_000)) {
+    return json(res, 429, { error: 'слишком много запросов' }, origin);
+  }
+
   route(req, res, url, origin).catch((e) => {
     console.error('[error]', req.method, url.pathname, e.message);
-    // сервис личный и за токеном — показываем причину, иначе такую ошибку
-    // не отладить, глядя только на телефон
     if (!res.headersSent) json(res, 500, { error: e.message }, origin);
   });
 });

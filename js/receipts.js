@@ -182,12 +182,9 @@ function parseFiscalXml(xmlString) {
 
     if (nameMatch) {
       const name = cleanProductName(nameMatch[1]);
-      let price = prcMatch ? parseFloat(prcMatch[1].replace(',', '.')) : 0;
-      let quantity = qMatch ? parseFloat(qMatch[1].replace(',', '.')) : 1;
-      let total = smMatch ? parseFloat(smMatch[1].replace(',', '.')) : (price * quantity);
-      if (price > 1000 && !prcMatch[1].includes('.')) price /= 100;
-      if (quantity >= 1000 && !qMatch[1].includes('.')) quantity /= 1000;
-      if (total > 1000 && !smMatch[1].includes('.')) total /= 100;
+      const price = prcMatch ? parseFloat(prcMatch[1].replace(',', '.')) : 0;
+      const quantity = qMatch ? parseFloat(qMatch[1].replace(',', '.')) : 1;
+      const total = smMatch ? parseFloat(smMatch[1].replace(',', '.')) : (price * quantity);
       items.push({ name, price, quantity, total });
     }
   }

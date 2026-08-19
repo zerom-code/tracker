@@ -47,11 +47,12 @@ function buildFinancialContext() {
     });
   }
 
-  // Все операции за последние 90 дней со строгим разделением магазина и купленных товаров
-  const cutoff = new Date(Date.now() - 90 * 86400 * 1000).toISOString().slice(0, 10);
+  // Операции за последние 60 дней (до 150 операций для стабильного контекста)
+  const cutoff = new Date(Date.now() - 60 * 86400 * 1000).toISOString().slice(0, 10);
   const recentTxs = state.transactions
     .filter((t) => (t.date >= cutoff))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, 150);
 
   const allTransactions = recentTxs.map((t) => {
     const { store, products } = extractStoreAndProducts(t.description);
@@ -78,13 +79,14 @@ function buildFinancialContext() {
     };
   });
 
-  // Все отдельные позиции из всех прикреплённых фискальных чеков
+  // Отдельные позиции из прикреплённых фискальных чеков (до 250 позиций)
   const allFiscalReceiptItems = [];
   for (const t of recentTxs) {
     if (t.receiptItems && t.receiptItems.length) {
       const { store } = extractStoreAndProducts(t.description);
       const cat = categoryById(t.categoryId || FALLBACK_CATEGORY).name;
       for (const it of t.receiptItems) {
+        if (allFiscalReceiptItems.length >= 250) break;
         allFiscalReceiptItems.push({
           date: t.date,
           store: store,
